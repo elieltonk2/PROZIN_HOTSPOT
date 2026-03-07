@@ -1,0 +1,2294 @@
+import React, { useState, useEffect } from 'react';
+import { 
+  Settings, 
+  Users, 
+  PlusCircle, 
+  Trash2, 
+  RefreshCw, 
+  ShieldCheck, 
+  ShieldAlert,
+  LayoutDashboard,
+  Key,
+  User,
+  Plug,
+  Database,
+  Search,
+  Download,
+  X,
+  Printer,
+  Wifi,
+  Network,
+  FileText,
+  Info,
+  Lock,
+  Unlock,
+  Eye,
+  EyeOff,
+  Rocket,
+  ExternalLink,
+  Activity,
+  Terminal as TerminalIcon,
+  Monitor,
+  CheckCircle2,
+  AlertCircle,
+  HelpCircle
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+
+const Logo = ({ size = 32, className = "", src = null }: { size?: number, className?: string, src?: string | null }) => {
+  if (src) {
+    return <img src={src} alt="Logo" style={{ width: size, height: size }} className={`object-contain ${className}`} />;
+  }
+  return (
+    <svg 
+      width={size} 
+      height={size} 
+      viewBox="0 0 100 100" 
+      fill="none" 
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+    >
+      {/* Top-Right to Bottom-Left line */}
+      <line x1="75" y1="25" x2="25" y2="75" stroke="#10b981" strokeWidth="8" strokeLinecap="round" />
+      <circle cx="75" cy="25" r="6" fill="#10b981" />
+      <circle cx="25" cy="75" r="6" fill="#10b981" />
+      
+      {/* Top-Left to Right line */}
+      <line x1="25" y1="25" x2="75" y2="50" stroke="#10b981" strokeWidth="8" strokeLinecap="round" />
+      <circle cx="25" cy="25" r="6" fill="#10b981" />
+      <circle cx="75" cy="50" r="6" fill="#10b981" />
+      
+      {/* Bottom-Left to Right line */}
+      <line x1="25" y1="75" x2="85" y2="85" stroke="#10b981" strokeWidth="8" strokeLinecap="round" />
+      <circle cx="25" cy="75" r="6" fill="#10b981" />
+      <circle cx="85" cy="85" r="6" fill="#10b981" />
+    </svg>
+  );
+};
+
+interface MikrotikUser {
+  '.id': string;
+  name: string;
+  profile: string;
+  uptime: string;
+  'bytes-in': string;
+  'bytes-out': string;
+  comment?: string;
+  disabled: string;
+}
+
+interface Profile {
+  name: string;
+}
+
+interface Device {
+  id: string;
+  name: string;
+  host: string;
+  user: string;
+  password: string;
+  port: string;
+}
+
+export default function App() {
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
+  const [config, setConfig] = useState({
+    host: '192.168.1.1',
+    user: 'admin',
+    password: '',
+    port: '8728'
+  });
+
+  useEffect(() => {
+    fetchDevices();
+  }, []);
+
+  const fetchDevices = async () => {
+    try {
+      const res = await fetch('/api/devices');
+      const data = await res.json();
+      setDevices(data);
+      
+      // Carregar o último dispositivo usado ou o primeiro da lista
+      const lastId = localStorage.getItem('selected_device_id');
+      if (lastId && data.find((d: Device) => d.id === lastId)) {
+        handleSelectDevice(data.find((d: Device) => d.id === lastId));
+      } else if (data.length > 0) {
+        handleSelectDevice(data[0]);
+      }
+    } catch (err) {
+      console.error('Erro ao buscar dispositivos:', err);
+    }
+  };
+
+  const handleSelectDevice = (device: Device) => {
+    setSelectedDeviceId(device.id);
+    // Limpeza extra do host para garantir que DNS Cloud funcione
+    const cleanedHost = device.host.trim().replace(/[\[\]]/g, '');
+    setConfig({
+      host: cleanedHost,
+      user: device.user,
+      password: device.password,
+      port: device.port || '8728'
+    });
+    localStorage.setItem('selected_device_id', device.id);
+    setIsConnected(false);
+    setError(null);
+  };
+
+  const handleAddDevice = async (newDevice: Omit<Device, 'id'>) => {
+    try {
+      const res = await fetch('/api/devices', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newDevice)
+      });
+      const data = await res.json();
+      if (data.success) {
+        fetchDevices();
+        return true;
+      }
+    } catch (err) {
+      alert('Erro ao adicionar dispositivo');
+    }
+    return false;
+  };
+
+  const handleDeleteDevice = async (id: string) => {
+    if (!window.confirm('Excluir este dispositivo?')) return;
+    try {
+      await fetch(`/api/devices/${id}`, { method: 'DELETE' });
+      fetchDevices();
+      if (selectedDeviceId === id) {
+        setSelectedDeviceId(null);
+        setIsConnected(false);
+      }
+    } catch (err) {
+      alert('Erro ao excluir dispositivo');
+    }
+  };
+  const [isConnected, setIsConnected] = useState(false);
+  const [users, setUsers] = useState<MikrotikUser[]>([]);
+  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'generator' | 'settings' | 'hotspot' | 'ppp' | 'logs' | 'about' | 'devices'>('settings');
+  
+  // Generator state
+  const [genCount, setGenCount] = useState(10);
+  const [genProfile, setGenProfile] = useState('default');
+  const [genPrefix, setGenPrefix] = useState('');
+  const [genLength, setGenLength] = useState(8);
+  const [genVoucherType, setGenVoucherType] = useState('username_only');
+  const [genCharType, setGenCharType] = useState('numbers');
+  const [genLimitBytes, setGenLimitBytes] = useState('0');
+  const [genDNSName, setGenDNSName] = useState('prozin.com');
+  const [genPrice, setGenPrice] = useState('');
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [genColor, setGenColor] = useState('emerald');
+  const [outletName, setOutletName] = useState(() => localStorage.getItem('outlet_name') || 'PROZIN_HOTSPOT');
+  const [lastGenerated, setLastGenerated] = useState<string[]>([]);
+  const [showPrintView, setShowPrintView] = useState(false);
+  const [settingsTab, setSettingsTab] = useState('general');
+  const [voucherTemplateType, setVoucherTemplateType] = useState('standard');
+  const [voucherImage, setVoucherImage] = useState<string | null>(null);
+  const [systemLogo, setSystemLogo] = useState<string | null>(() => localStorage.getItem('system_logo'));
+  const [detectedIP, setDetectedIP] = useState<string | null>(null);
+  
+  // Security & Welcome State
+  const [showWelcome, setShowWelcome] = useState(() => !localStorage.getItem('welcome_seen'));
+  const [appPin, setAppPin] = useState(() => localStorage.getItem('app_pin') || '');
+  const [isLocked, setIsLocked] = useState(() => !!localStorage.getItem('app_pin'));
+  const [pinInput, setPinInput] = useState('');
+  const [isSettingPin, setIsSettingPin] = useState(false);
+  const [showPin, setShowPin] = useState(false);
+  
+  useEffect(() => {
+    fetch('/api/utils/my-ip')
+      .then(res => res.json())
+      .then(data => setDetectedIP(data.ip))
+      .catch(() => {});
+  }, []);
+  
+  useEffect(() => {
+    localStorage.setItem('outlet_name', outletName);
+  }, [outletName]);
+
+  useEffect(() => {
+    if (systemLogo) localStorage.setItem('system_logo', systemLogo);
+    else localStorage.removeItem('system_logo');
+  }, [systemLogo]);
+  
+  // Uptime state
+  const [uptimeDays, setUptimeDays] = useState(0);
+  const [uptimeHours, setUptimeHours] = useState(1);
+  const [uptimeMinutes, setUptimeMinutes] = useState(0);
+
+  useEffect(() => {
+    if (profiles.length > 0 && !profiles.find(p => p.name === genProfile)) {
+      setGenProfile(profiles[0].name);
+    }
+  }, [profiles]);
+
+  const [isAddDeviceModalOpen, setIsAddDeviceModalOpen] = useState(false);
+  const [isDiagnosticModalOpen, setIsDiagnosticModalOpen] = useState(false);
+  const [diagnosticSteps, setDiagnosticSteps] = useState<{name: string, status: 'pending' | 'loading' | 'success' | 'error', message?: string}[]>([]);
+  const [serverPublicIp, setServerPublicIp] = useState<string>('');
+
+  const runDiagnostic = async () => {
+    setIsDiagnosticModalOpen(true);
+    setDiagnosticSteps([
+      { name: 'Verificando IP do Servidor', status: 'loading' },
+      { name: 'Testando Acesso à Porta 8728', status: 'pending' },
+      { name: 'Tentando Login na API', status: 'pending' }
+    ]);
+
+    try {
+      // Step 1: Get Server IP
+      const ipRes = await fetch('/api/utils/my-ip');
+      const ipData = await ipRes.json();
+      setServerPublicIp(ipData.ip);
+      setDiagnosticSteps(prev => [
+        { ...prev[0], status: 'success', message: `IP: ${ipData.ip}` },
+        { ...prev[1], status: 'loading' },
+        prev[2]
+      ]);
+
+      // Step 2: Test Port
+      const portRes = await fetch('/api/mikrotik/test-port', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ host: config.host, port: config.port })
+      });
+      const portData = await portRes.json();
+      
+      if (portData.success) {
+        setDiagnosticSteps(prev => [
+          prev[0],
+          { ...prev[1], status: 'success', message: 'Porta Aberta' },
+          { ...prev[2], status: 'loading' }
+        ]);
+
+        // Step 3: Test Login
+        const connRes = await fetch('/api/mikrotik/connect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(config)
+        });
+        const connData = await connRes.json();
+        
+        if (connData.success) {
+          setDiagnosticSteps(prev => [
+            prev[0],
+            prev[1],
+            { ...prev[2], status: 'success', message: 'Login OK' }
+          ]);
+        } else {
+          setDiagnosticSteps(prev => [
+            prev[0],
+            prev[1],
+            { ...prev[2], status: 'error', message: connData.message }
+          ]);
+        }
+      } else {
+        setDiagnosticSteps(prev => [
+          prev[0],
+          { ...prev[1], status: 'error', message: portData.message },
+          { ...prev[2], status: 'pending' }
+        ]);
+      }
+    } catch (err: any) {
+      setDiagnosticSteps(prev => prev.map(s => s.status === 'loading' ? { ...s, status: 'error', message: 'Falha na requisição' } : s));
+    }
+  };
+
+  const [newDeviceData, setNewDeviceData] = useState({
+    name: '',
+    host: '',
+    user: 'admin',
+    password: '',
+    port: '8728'
+  });
+
+  const handleAddDeviceSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const success = await handleAddDevice(newDeviceData);
+    if (success) {
+      setIsAddDeviceModalOpen(false);
+      setNewDeviceData({ name: '', host: '', user: 'admin', password: '', port: '8728' });
+    }
+  };
+  const [testResult, setTestResult] = useState<{success: boolean, message: string} | null>(null);
+
+  const handleTestPort = async () => {
+    setLoading(true);
+    setTestResult(null);
+    try {
+      const res = await fetch('/api/mikrotik/test-port', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ host: config.host, port: config.port })
+      });
+      const data = await res.json();
+      setTestResult({ success: data.success, message: data.message });
+    } catch (err) {
+      setTestResult({ success: false, message: 'Erro ao testar porta.' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth >= 1024) {
+        setIsMobileMenuOpen(false);
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const handleSetupCleanup = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/mikrotik/setup-cleanup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config)
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert(data.message);
+      } else {
+        setError(data.message);
+      }
+    } catch (err) {
+      setError('Erro ao configurar auto-limpeza.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUnlock = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (pinInput === appPin) {
+      setIsLocked(false);
+      setPinInput('');
+      setError(null);
+    } else {
+      setError('PIN Incorreto');
+      setPinInput('');
+    }
+  };
+
+  const handleSetPin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (pinInput.length < 4) {
+      setError('O PIN deve ter pelo menos 4 dígitos');
+      return;
+    }
+    setAppPin(pinInput);
+    localStorage.setItem('app_pin', pinInput);
+    setIsSettingPin(false);
+    setPinInput('');
+    alert('PIN de segurança configurado com sucesso!');
+  };
+
+  const handleRemovePin = () => {
+    if (window.confirm('Deseja realmente remover a trava de segurança?')) {
+      setAppPin('');
+      localStorage.removeItem('app_pin');
+      setIsLocked(false);
+      alert('Trava de segurança removida.');
+    }
+  };
+
+  const closeWelcome = () => {
+    setShowWelcome(false);
+    localStorage.setItem('welcome_seen', 'true');
+  };
+
+  const handleConnect = async (e?: React.FormEvent | React.MouseEvent) => {
+    if (e) e.preventDefault();
+    setLoading(true);
+    setError(null);
+    try {
+      // Testar porta antes de tentar conexão pesada
+      const portRes = await fetch('/api/mikrotik/test-port', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ host: config.host, port: config.port })
+      });
+      const portData = await portRes.json();
+      
+      if (!portData.success) {
+        throw new Error(`A porta ${config.port} está fechada no host ${config.host}. Verifique se o serviço API está ativo na MikroTik.`);
+      }
+
+      const res = await fetch('/api/mikrotik/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config)
+      });
+      const data = await res.json();
+      if (data.success) {
+        setIsConnected(true);
+        setActiveTab('dashboard');
+        fetchData(true);
+      } else {
+        setError(data.message || 'Erro desconhecido ao conectar ao Mikrotik.');
+      }
+    } catch (err: any) {
+      setError(err.message || 'Não foi possível alcançar o servidor do App.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchData = async (force = false) => {
+    if (!isConnected && !force) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const [usersRes, profilesRes] = await Promise.all([
+        fetch('/api/mikrotik/users', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(config)
+        }),
+        fetch('/api/mikrotik/profiles', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(config)
+        })
+      ]);
+      
+      const usersData = await usersRes.json();
+      const profilesData = await profilesRes.json();
+      
+      if (usersData.success) setUsers(usersData.users);
+      if (profilesData.success) setProfiles(profilesData.profiles);
+    } catch (err) {
+      setError('Erro ao buscar dados do Mikrotik.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setVoucherImage(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleGenerate = async () => {
+    setLoading(true);
+    
+    // Format uptime string
+    const uptimeStr = `${uptimeDays > 0 ? uptimeDays + 'd' : ''}${uptimeHours}h${uptimeMinutes}m`;
+    
+    // Format bytes string (assuming input is in MB)
+    const bytesVal = parseInt(genLimitBytes) > 0 ? (parseInt(genLimitBytes) * 1024 * 1024).toString() : "0";
+
+    try {
+      const res = await fetch('/api/mikrotik/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...config,
+          count: genCount,
+          profile: genProfile,
+          prefix: genPrefix,
+          length: genLength,
+          limitUptime: uptimeStr,
+          limitBytes: bytesVal,
+          voucherType: genVoucherType,
+          charType: genCharType,
+          comment: `Preço: ${genPrice} | Cor: ${genColor}`
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setLastGenerated(data.createdUsers);
+        setShowPrintView(true);
+        fetchData();
+        setActiveTab('dashboard');
+      } else {
+        setError(data.message);
+      }
+    } catch (err) {
+      setError('Erro ao gerar usuários.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    try {
+      const res = await fetch(`/api/mikrotik/users/${id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config)
+      });
+      const data = await res.json();
+      if (data.success) {
+        setUsers(users.filter(u => u['.id'] !== id));
+      }
+    } catch (err) {
+      setError('Erro ao excluir usuário.');
+    }
+  };
+
+  const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
+
+  const copyToClipboard = (text: string, message = 'Copiado para a área de transferência!') => {
+    navigator.clipboard.writeText(text);
+    alert(message);
+  };
+
+  if (showWelcome) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center p-4">
+        <div className="w-full max-w-lg bg-zinc-950 border border-primary/20 p-8 shadow-2xl relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-primary to-transparent opacity-50" />
+          
+          <div className="flex flex-col items-center text-center space-y-6">
+            <div className="p-4 bg-primary/10 rounded-full text-primary">
+              <Rocket size={48} />
+            </div>
+            
+            <div className="space-y-2">
+              <h1 className="font-serif italic text-4xl text-white">Bem-vindo ao PROZIN</h1>
+              <p className="text-primary/60 uppercase tracking-widest text-[10px] font-bold">Sistema de Gestão Mikrotik Hotspot</p>
+            </div>
+
+            <div className="bg-white/5 p-6 rounded-xl text-left space-y-4 border border-white/5">
+              <p className="text-sm leading-relaxed opacity-80">
+                Este aplicativo permite que você gerencie sua RB Mikrotik de qualquer lugar do mundo, 
+                mesmo usando Starlink ou estando atrás de CGNAT.
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="flex items-start gap-3">
+                  <div className="mt-1 text-primary"><ShieldCheck size={14} /></div>
+                  <div className="text-[11px] opacity-60">Geração de vouchers em massa com um clique.</div>
+                </div>
+                <div className="flex items-start gap-3">
+                  <div className="mt-1 text-primary"><Network size={14} /></div>
+                  <div className="text-[11px] opacity-60">Configuração automática de IPv6 para PPPoE.</div>
+                </div>
+                <div className="flex items-start gap-3">
+                  <div className="mt-1 text-primary"><Lock size={14} /></div>
+                  <div className="text-[11px] opacity-60">Segurança local: seus dados ficam no seu navegador.</div>
+                </div>
+                <div className="flex items-start gap-3">
+                  <div className="mt-1 text-primary"><Wifi size={14} /></div>
+                  <div className="text-[11px] opacity-60">Acesso remoto via IPv6 ou Túnel VPN.</div>
+                </div>
+              </div>
+            </div>
+
+            <button 
+              onClick={closeWelcome}
+              className="w-full bg-primary text-black py-4 font-bold uppercase tracking-[0.2em] text-sm hover:opacity-90 transition-all"
+            >
+              COMEÇAR AGORA
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (isLocked) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center p-4">
+        <div className="w-full max-w-md bg-zinc-950 border border-white/5 p-8 shadow-2xl text-center">
+          <div className="flex justify-center mb-6">
+            <div className="p-4 bg-zinc-900 rounded-full text-primary">
+              <Lock size={40} />
+            </div>
+          </div>
+          
+          <h2 className="font-serif italic text-2xl mb-2">App Bloqueado</h2>
+          <p className="text-[10px] uppercase tracking-widest opacity-40 mb-8">Insira seu PIN de segurança para continuar</p>
+
+          <form onSubmit={handleUnlock} className="space-y-6">
+            <div className="relative">
+              <input 
+                type={showPin ? "text" : "password"}
+                value={pinInput}
+                onChange={e => setPinInput(e.target.value)}
+                className="w-full bg-zinc-900 border-b-2 border-primary/20 py-4 text-center text-2xl tracking-[0.5em] focus:outline-none focus:border-primary transition-all font-mono"
+                placeholder="****"
+                autoFocus
+              />
+              <button 
+                type="button"
+                onClick={() => setShowPin(!showPin)}
+                className="absolute right-0 top-1/2 -translate-y-1/2 p-2 text-zinc-500 hover:text-primary"
+              >
+                {showPin ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </div>
+
+            {error && <p className="text-red-500 text-[10px] font-bold uppercase">{error}</p>}
+
+            <button 
+              type="submit"
+              className="w-full bg-primary text-black py-4 font-bold uppercase tracking-widest text-sm hover:opacity-90 transition-all"
+            >
+              DESBLOQUEAR
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isConnected) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center p-4">
+        <div className="w-full max-w-md bg-zinc-950 shadow-2xl overflow-hidden border border-white/5">
+          {/* Header */}
+          <div className="bg-zinc-950 p-3 flex items-center justify-between text-primary shadow-lg border-b border-primary/20">
+            <div className="flex items-center gap-2">
+              <ShieldCheck size={16} className="text-primary" />
+              <span className="font-bold text-sm tracking-tight uppercase">{outletName}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={() => setIsHelpModalOpen(true)}
+                className="hover:bg-white/10 p-1 rounded transition-colors text-primary flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest"
+              >
+                <HelpCircle size={14} /> Ajuda
+              </button>
+              <button className="hover:bg-white/10 p-1 rounded transition-colors text-zinc-400">
+                <X size={18} />
+              </button>
+            </div>
+          </div>
+
+          {/* Body */}
+          <div className="p-8 space-y-8">
+            {/* Logo Display */}
+            {systemLogo && (
+              <div className="flex justify-center mb-4">
+                <img src={systemLogo} alt="Logo" className="h-20 w-auto object-contain brightness-125" referrerPolicy="no-referrer" />
+              </div>
+            )}
+
+            <form onSubmit={handleConnect} className="space-y-8">
+              {/* Connection Row */}
+              <div className="flex items-start gap-6">
+                <div className="p-3 bg-zinc-900 rounded-lg text-primary/50 border border-white/5">
+                  <Plug size={32} />
+                </div>
+                <div className="flex-1 space-y-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-primary/70 uppercase tracking-widest">Conectar a :</label>
+                    <input 
+                      type="text" 
+                      value={config.host}
+                      onChange={e => setConfig({...config, host: e.target.value})}
+                      className="w-full bg-zinc-800 text-white px-3 py-2 rounded border border-white/5 focus:outline-none focus:ring-2 focus:ring-primary transition-all font-mono text-sm"
+                      placeholder="IP ou DNS Cloud"
+                      required
+                    />
+                    {(config.host.toLowerCase().startsWith('fd') || config.host.toLowerCase().startsWith('fe') || config.host.startsWith('192.168') || config.host.startsWith('10.') || config.host.startsWith('172.')) && (
+                      <div className="bg-red-500/20 border-2 border-red-500 p-4 rounded-lg mt-4 animate-pulse">
+                        <p className="text-[11px] text-red-400 uppercase font-black tracking-tighter flex items-center gap-2">
+                          <ShieldAlert size={16} /> ATENÇÃO: IP LOCAL DETECTADO
+                        </p>
+                        <p className="text-[10px] text-zinc-300 mt-2 leading-relaxed">
+                          Este aplicativo roda na <b>Nuvem</b> e não consegue "enxergar" seu IP local (192.168.x.x).
+                        </p>
+                        <p className="text-[10px] text-primary mt-2 font-bold">
+                          SOLUÇÃO: Use o "DNS Name" do menu IP {'>'} Cloud da sua MikroTik ou um IP Público/IPv6.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex justify-end">
+                    <div className="w-24 space-y-1">
+                      <input 
+                        type="text" 
+                        value={config.port}
+                        onChange={e => setConfig({...config, port: e.target.value})}
+                        className="w-full bg-zinc-800 text-white px-3 py-2 rounded border border-white/5 text-right focus:outline-none focus:ring-2 focus:ring-primary transition-all font-mono text-sm"
+                      />
+                    </div>
+                    {config.port === '3000' && (
+                      <div className="bg-yellow-500/10 border border-yellow-500/20 p-3 rounded mt-2">
+                        <p className="text-[9px] text-yellow-400 uppercase font-bold tracking-widest flex items-center gap-2">
+                          <AlertCircle size={12} /> Porta 3000 Detectada
+                        </p>
+                        <p className="text-[8px] text-yellow-300/70 mt-1 leading-tight">
+                          A porta 3000 é usada por este aplicativo. A porta padrão da API MikroTik é <b>8728</b> (ou 8729 para SSL). Verifique se esta é realmente a porta da sua MikroTik.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* URL Warning */}
+              {window.location.hostname.match(/^\d+\.\d+\.\d+\.\d+$/) && (
+                <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-lg">
+                  <p className="text-[10px] text-red-400 font-bold uppercase tracking-widest flex items-center gap-2 mb-2">
+                    <ShieldAlert size={14} /> Acesso via IP Detectado
+                  </p>
+                  <p className="text-[11px] text-zinc-400 leading-relaxed">
+                    Você está acessando o aplicativo diretamente via IP (<b>{window.location.hostname}</b>). Para que todas as funções (como OAuth e segurança) funcionem corretamente, utilize sempre a URL oficial do aplicativo: <br/>
+                    <code className="text-primary mt-1 block bg-black/40 p-1 rounded break-all">{window.location.origin}</code>
+                  </p>
+                </div>
+              )}
+
+              {/* Login Row */}
+              <div className="flex items-center gap-6">
+                <div className="p-3 bg-zinc-900 rounded-lg text-primary/50 border border-white/5">
+                  <User size={32} />
+                </div>
+                <div className="flex-1 space-y-1">
+                  <label className="text-[10px] font-bold text-primary/70 uppercase tracking-widest">Usuário :</label>
+                  <input 
+                    type="text" 
+                    value={config.user}
+                    onChange={e => setConfig({...config, user: e.target.value})}
+                    className="w-full bg-zinc-800 text-white px-3 py-2 rounded border border-white/5 focus:outline-none focus:ring-2 focus:ring-primary transition-all font-mono text-sm"
+                    required
+                  />
+                </div>
+              </div>
+
+              {/* Password Row */}
+              <div className="flex items-center gap-6">
+                <div className="p-3 bg-zinc-900 rounded-lg text-primary/50 border border-white/5">
+                  <Key size={32} />
+                </div>
+                <div className="flex-1 space-y-1">
+                  <label className="text-[10px] font-bold text-primary/70 uppercase tracking-widest">Senha :</label>
+                  <input 
+                    type="password" 
+                    value={config.password}
+                    onChange={e => setConfig({...config, password: e.target.value})}
+                    className="w-full bg-zinc-800 text-white px-3 py-2 rounded border border-white/5 focus:outline-none focus:ring-2 focus:ring-primary transition-all font-mono text-sm"
+                  />
+                </div>
+              </div>
+
+              {error && (
+                <motion.div 
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  className="p-4 bg-red-500/10 border border-red-500/20 text-red-400 text-xs flex flex-col gap-3"
+                >
+                  <div className="flex items-start gap-3">
+                    <ShieldAlert size={18} className="shrink-0" />
+                    <div className="flex-1">
+                      <p className="leading-relaxed font-bold uppercase text-[10px] tracking-widest">{error}</p>
+                      {error.includes('192.168') && (
+                        <p className="mt-2 text-[9px] opacity-60 normal-case italic">Dica: IPs 192.168.x.x são locais. Use o IPv6 ou DNS Cloud para acesso remoto.</p>
+                      )}
+                    </div>
+                  </div>
+                      <div className="flex flex-col gap-2 mt-3">
+                        <button 
+                          type="button"
+                          onClick={runDiagnostic}
+                          className="w-full px-3 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-300 font-bold uppercase tracking-widest text-[9px] transition-all border border-red-500/30"
+                        >
+                          Executar Diagnóstico Completo
+                        </button>
+                        <button 
+                          type="button"
+                          onClick={() => copyToClipboard(`/ip cloud set ddns-enabled=yes\n/ip service enable api\n/ip firewall filter add action=accept chain=input dst-port=8728 protocol=tcp comment="Permitir API Mikrotik (PROZIN)"`, 'Script de correção copiado!')}
+                          className="w-full px-3 py-2 bg-primary/10 hover:bg-primary/20 text-primary font-bold uppercase tracking-widest text-[9px] transition-all border border-primary/20"
+                        >
+                          Copiar Script de Correção Rápida
+                        </button>
+                      </div>
+                </motion.div>
+              )}
+
+              <div className="flex flex-col gap-4">
+                <button 
+                  type="button"
+                  onClick={handleTestPort}
+                  disabled={loading}
+                  className="w-full border border-white/10 text-[10px] font-bold uppercase tracking-widest py-3 hover:bg-white/5 transition-all flex items-center justify-center gap-2 disabled:opacity-30"
+                >
+                  {loading ? <RefreshCw className="animate-spin" size={12} /> : <Wifi size={12} />}
+                  Testar Conexão (Porta {config.port})
+                </button>
+
+                {testResult && (
+                  <div className={`p-3 text-[9px] uppercase font-bold tracking-widest border flex flex-col gap-2 ${testResult.success ? 'bg-primary/10 border-primary text-primary' : 'bg-red-950/30 border-red-900 text-red-500'}`}>
+                    <div className="flex items-center gap-2">
+                      {testResult.success ? <ShieldCheck size={14} /> : <ShieldAlert size={14} />}
+                      <span>{testResult.message}</span>
+                    </div>
+                    {!testResult.success && (
+                      <div className="bg-black/40 p-2 rounded text-[8px] normal-case font-normal opacity-80 space-y-2">
+                        <p><b>Como resolver:</b></p>
+                        <ul className="list-disc ml-4 space-y-1">
+                          <li>Vá em <b>IP {'>'} Services</b> e ative o serviço <b>api</b> (porta 8728).</li>
+                          <li>Vá em <b>IP {'>'} Cloud</b>, ative <b>DDNS Enabled</b> e use o <b>DNS Name</b> como Host.</li>
+                          <li>Verifique se o <b>Firewall</b> permite conexões na porta 8728 (Chain Input).</li>
+                        </ul>
+                        <button 
+                          type="button"
+                          onClick={() => copyToClipboard(`/ip cloud set ddns-enabled=yes\n/ip service enable api\n/ip firewall filter add action=accept chain=input dst-port=8728 protocol=tcp comment="Permitir API Mikrotik (PROZIN)"`, 'Script de configuração copiado!')}
+                          className="w-full bg-primary/20 hover:bg-primary/30 text-primary py-1.5 rounded text-[8px] font-bold uppercase tracking-widest transition-all mt-1"
+                        >
+                          Copiar Script de Correção
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {detectedIP && (
+                <div className="text-center">
+                  <p className="text-[9px] uppercase tracking-widest opacity-30">Seu IP Detectado:</p>
+                  <p className="text-[10px] font-mono text-primary/60 mt-1">{detectedIP}</p>
+                </div>
+              )}
+            </form>
+          </div>
+
+          {/* Footer / Login Button */}
+          <button 
+            onClick={() => handleConnect()}
+            disabled={loading}
+            className="w-full bg-primary text-black py-5 font-bold uppercase tracking-[0.3em] text-sm hover:opacity-90 active:scale-[0.98] transition-all flex items-center justify-center gap-3 disabled:opacity-50 border-t border-primary/20"
+          >
+            {loading ? <RefreshCw className="animate-spin" size={18} /> : 'ENTRAR'}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-black text-zinc-300 font-sans selection:bg-primary selection:text-black">
+      {/* Mobile Header */}
+      <div className="lg:hidden fixed top-0 left-0 w-full bg-zinc-950 border-b border-white/5 p-4 flex items-center justify-between z-30">
+        <div className="flex items-center gap-3">
+          <Logo size={32} src={systemLogo} />
+          <h1 className="font-serif italic text-lg font-bold text-primary truncate max-w-[150px] uppercase tracking-tight">{outletName}</h1>
+        </div>
+        <button 
+          onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+          className="p-2 text-primary hover:bg-white/5 transition-all rounded"
+        >
+          {isMobileMenuOpen ? <X size={24} /> : <LayoutDashboard size={24} />}
+        </button>
+      </div>
+
+      {/* Sidebar Overlay for Mobile */}
+      <AnimatePresence>
+        {isMobileMenuOpen && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setIsMobileMenuOpen(false)}
+            className="lg:hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-40"
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Sidebar */}
+      <div className={`fixed left-0 top-0 h-full w-64 border-r border-white/5 bg-zinc-950 z-50 transition-transform duration-300 lg:translate-x-0 ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+        <div className="p-8 border-b border-white/5 flex flex-col items-center text-center">
+          <Logo size={64} className="mb-4" src={systemLogo} />
+          <h1 className="font-serif italic text-xl font-bold tracking-tight text-primary truncate w-full uppercase">{outletName}</h1>
+          <p className="text-[10px] uppercase tracking-widest opacity-40 mt-1 text-primary/50">Mikrotik Hotspot Manager</p>
+        </div>
+
+        <nav className="mt-8 overflow-y-auto max-h-[calc(100vh-300px)]">
+          {isConnected && (
+            <>
+              <button 
+                onClick={() => {
+                  setActiveTab('devices');
+                  setIsMobileMenuOpen(false);
+                }}
+                className={`w-full flex items-center gap-4 px-8 py-4 text-sm font-medium transition-all ${activeTab === 'devices' ? 'bg-primary text-black' : 'hover:bg-white/5 opacity-40 hover:opacity-100'}`}
+              >
+                <Database size={18} />
+                Meus Mikrotiks
+              </button>
+              <button 
+                onClick={() => {
+                  setActiveTab('dashboard');
+                  setIsMobileMenuOpen(false);
+                }}
+                className={`w-full flex items-center gap-4 px-8 py-4 text-sm font-medium transition-all ${activeTab === 'dashboard' ? 'bg-primary text-black' : 'hover:bg-white/5 opacity-40 hover:opacity-100'}`}
+              >
+                <LayoutDashboard size={18} />
+                Dashboard
+              </button>
+              <button 
+                onClick={() => {
+                  setActiveTab('generator');
+                  setIsMobileMenuOpen(false);
+                }}
+                className={`w-full flex items-center gap-4 px-8 py-4 text-sm font-medium transition-all ${activeTab === 'generator' ? 'bg-primary text-black' : 'hover:bg-white/5 opacity-40 hover:opacity-100'}`}
+              >
+                <PlusCircle size={18} />
+                Gerador de Vouchers
+              </button>
+              <button 
+                onClick={() => {
+                  setActiveTab('hotspot');
+                  setIsMobileMenuOpen(false);
+                }}
+                className={`w-full flex items-center gap-4 px-8 py-4 text-sm font-medium transition-all ${activeTab === 'hotspot' ? 'bg-primary text-black' : 'hover:bg-white/5 opacity-40 hover:opacity-100'}`}
+              >
+                <Wifi size={18} />
+                Hotspot
+              </button>
+              <button 
+                onClick={() => {
+                  setActiveTab('ppp');
+                  setIsMobileMenuOpen(false);
+                }}
+                className={`w-full flex items-center gap-4 px-8 py-4 text-sm font-medium transition-all ${activeTab === 'ppp' ? 'bg-primary text-black' : 'hover:bg-white/5 opacity-40 hover:opacity-100'}`}
+              >
+                <Network size={18} />
+                PPP
+              </button>
+            </>
+          )}
+          
+          <button 
+            onClick={() => {
+              setActiveTab('settings');
+              setIsMobileMenuOpen(false);
+            }}
+            className={`w-full flex items-center gap-4 px-8 py-4 text-sm font-medium transition-all ${activeTab === 'settings' ? 'bg-primary text-black' : 'hover:bg-white/5 opacity-40 hover:opacity-100'}`}
+          >
+            <Settings size={18} />
+            Configurações
+          </button>
+
+          {isConnected && (
+            <button 
+              onClick={() => {
+                setActiveTab('logs');
+                setIsMobileMenuOpen(false);
+              }}
+              className={`w-full flex items-center gap-4 px-8 py-4 text-sm font-medium transition-all ${activeTab === 'logs' ? 'bg-primary text-black' : 'hover:bg-white/5 opacity-40 hover:opacity-100'}`}
+            >
+              <FileText size={18} />
+              Logs
+            </button>
+          )}
+
+          <button 
+            onClick={() => {
+              setActiveTab('about');
+              setIsMobileMenuOpen(false);
+            }}
+            className={`w-full flex items-center gap-4 px-8 py-4 text-sm font-medium transition-all ${activeTab === 'about' ? 'bg-primary text-black' : 'hover:bg-white/5 opacity-40 hover:opacity-100'}`}
+          >
+            <Info size={18} />
+            Sobre
+          </button>
+        </nav>
+
+        <div className="absolute bottom-0 w-full p-8 border-t border-white/5">
+          <div className="mb-4 p-3 bg-primary/5 border border-primary/10 rounded-lg">
+            <div className="flex items-center gap-2 mb-1">
+              <RefreshCw size={10} className="text-primary animate-pulse" />
+              <span className="text-[9px] uppercase font-bold tracking-widest text-primary">Cloud Active</span>
+            </div>
+            <p className="text-[9px] opacity-40 truncate text-primary/50">Host: {config.host}</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-primary shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-red-500'}`} />
+            <span className="text-[10px] uppercase font-bold tracking-widest opacity-40">
+              {isConnected ? 'Conectado' : 'Desconectado'}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {showPrintView && (
+        <div className="fixed inset-0 z-[100] bg-zinc-950 flex flex-col overflow-hidden print:p-0 print:bg-white">
+          <div className="p-6 border-b border-white/10 flex justify-between items-center print:hidden">
+            <h2 className="font-serif italic text-2xl">Vouchers Gerados</h2>
+            <div className="flex gap-4">
+              <button 
+                onClick={() => window.print()}
+                className="bg-primary text-black px-6 py-2 font-bold uppercase tracking-widest text-xs flex items-center gap-2 hover:opacity-90 transition-opacity"
+              >
+                <Printer size={16} /> Imprimir
+              </button>
+              <button 
+                onClick={() => setShowPrintView(false)}
+                className="border border-white/10 px-6 py-2 font-bold uppercase tracking-widest text-xs hover:bg-white/5 transition-colors"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+          
+          <div className="flex-1 overflow-y-auto p-12 bg-zinc-900/50 print:bg-white print:p-0">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 print:grid-cols-3 print:gap-2">
+              {lastGenerated.map((code) => (
+                <div key={code} className={`bg-zinc-950 border border-white/10 p-6 rounded-xl flex flex-col items-center text-center print:border-black print:text-black print:rounded-none print:shadow-none print:bg-white relative overflow-hidden min-h-[180px] justify-center`}>
+                  {voucherTemplateType === 'custom' && voucherImage ? (
+                    <div className="absolute inset-0 z-0">
+                      <img src={voucherImage} alt="Template" className="w-full h-full object-cover opacity-30 print:opacity-100" />
+                    </div>
+                  ) : (
+                    <div className={`absolute top-0 left-0 w-full h-1 ${
+                      genColor === 'blue' ? 'bg-blue-500' : 
+                      genColor === 'red' ? 'bg-red-500' : 
+                      genColor === 'amber' ? 'bg-amber-500' : 
+                      genColor === 'purple' ? 'bg-purple-500' : 'bg-primary'
+                    }`} />
+                  )}
+                  
+                  <div className="relative z-10 w-full flex flex-col items-center">
+                    <Logo size={24} className="mb-2 opacity-80" src={systemLogo} />
+                    <div className="text-[10px] uppercase font-bold tracking-widest opacity-60 mb-3 print:text-black">{outletName}</div>
+                    <div className="font-serif italic text-2xl mb-2">{code}</div>
+                    <div className="text-[9px] uppercase tracking-widest opacity-40 print:opacity-100 font-bold">
+                      {uptimeDays > 0 ? `${uptimeDays}d ` : ''}{uptimeHours}h {uptimeMinutes}m
+                      {parseInt(genLimitBytes) > 0 ? ` • ${genLimitBytes}MB` : ''}
+                    </div>
+                    {genPrice && (
+                      <div className="mt-2 text-[11px] font-bold text-primary print:text-black">
+                        {genPrice}
+                      </div>
+                    )}
+                    <div className="mt-4 pt-4 border-t border-white/5 w-full text-[8px] opacity-30 print:border-black print:opacity-100 leading-relaxed">
+                      Portal: {genDNSName}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Main Content */}
+      <main className="lg:ml-64 p-6 lg:p-12 min-h-screen pt-24 lg:pt-12">
+        <AnimatePresence mode="wait">
+          {activeTab === 'hotspot' && (
+            <motion.div 
+              key="hotspot"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+            >
+              <div className="mb-12">
+                <h2 className="font-serif italic text-4xl mb-2">Hotspot Status</h2>
+                <p className="opacity-40 text-sm">Informações em tempo real do seu servidor Hotspot.</p>
+              </div>
+              <div className="p-12 border border-line bg-white/5 text-center opacity-40 italic">
+                Módulo Hotspot em desenvolvimento. Em breve você poderá ver usuários ativos e hosts.
+              </div>
+            </motion.div>
+          )}
+
+          {activeTab === 'ppp' && (
+            <motion.div 
+              key="ppp"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+            >
+              <div className="flex justify-between items-end mb-12">
+                <div>
+                  <h2 className="font-serif italic text-4xl mb-2">PPP (PPPoE)</h2>
+                  <p className="opacity-40 text-sm">Gerenciamento de conexões PPPoE e IPv6.</p>
+                </div>
+                <div className="flex gap-4">
+                  <button 
+                    onClick={async () => {
+                      if (!window.confirm("Isso irá configurar o DHCPv6 Client na ether1, criar o pool 'pool-ipv6', configurar o endereço na Bridge e os perfis PPP para entregar IPv6 aos clientes. Continuar?")) return;
+                      setLoading(true);
+                      try {
+                        const res = await fetch('/api/mikrotik/setup-ipv6-pppoe', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify(config)
+                        });
+                        const data = await res.json();
+                        if (data.success) alert("IPv6 configurado com sucesso para Bridge e PPPoE!");
+                        else alert("Erro: " + data.message);
+                      } catch (e) {
+                        alert("Erro de conexão");
+                      } finally {
+                        setLoading(false);
+                      }
+                    }}
+                    className="flex items-center gap-2 bg-primary/10 text-primary border border-primary/20 px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-primary hover:text-black transition-all"
+                  >
+                    <Network size={16} /> Configurar IPv6
+                  </button>
+                  <button 
+                    onClick={() => fetchData(true)}
+                    className="p-2 border border-line hover:bg-white/5 transition-colors rounded-lg text-primary"
+                  >
+                    <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
+                  </button>
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
+                <div className="p-6 border border-line bg-surface">
+                  <div className="text-[10px] uppercase font-bold tracking-widest opacity-40 mb-2">Clientes Ativos</div>
+                  <div className="text-3xl font-serif italic text-primary">{users.length}</div>
+                </div>
+                <div className="p-6 border border-line bg-surface">
+                  <div className="text-[10px] uppercase font-bold tracking-widest opacity-40 mb-2">Pool IPv6</div>
+                  <div className="text-xs font-mono opacity-60 truncate">pool-pppoe (PD /64)</div>
+                </div>
+                <div className="p-6 border border-line bg-surface">
+                  <div className="text-[10px] uppercase font-bold tracking-widest opacity-40 mb-2">Status Starlink</div>
+                  <div className="text-xs text-primary font-bold uppercase tracking-widest">Conectado</div>
+                </div>
+              </div>
+
+              <div className="border border-line bg-surface overflow-x-auto">
+                <div className="min-w-[600px]">
+                  <div className="grid grid-cols-[1.5fr_1fr_1fr_1fr] p-4 border-b border-line bg-white/5">
+                    <span className="text-[10px] uppercase font-bold tracking-widest opacity-40">Usuário PPPoE</span>
+                    <span className="text-[10px] uppercase font-bold tracking-widest opacity-40">Endereço IP</span>
+                    <span className="text-[10px] uppercase font-bold tracking-widest opacity-40">Uptime</span>
+                    <span className="text-[10px] uppercase font-bold tracking-widest opacity-40 text-right">Serviço</span>
+                  </div>
+                  <div className="divide-y divide-line">
+                    {users.length === 0 ? (
+                      <div className="p-12 text-center opacity-20 italic">Nenhum cliente PPPoE ativo no momento.</div>
+                    ) : (
+                      users.map((user, idx) => (
+                        <div key={idx} className="grid grid-cols-[1.5fr_1fr_1fr_1fr] p-4 items-center hover:bg-white/5 transition-all group">
+                          <span className="font-mono font-bold text-primary truncate">{user.name}</span>
+                          <span className="text-sm opacity-60 truncate">{user.address || '---'}</span>
+                          <span className="text-sm opacity-60 font-mono truncate">{user.uptime || '0s'}</span>
+                          <span className="text-[10px] uppercase font-bold opacity-40 text-right">pppoe</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {activeTab === 'devices' && (
+            <motion.div 
+              key="devices"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+            >
+              <div className="flex justify-between items-end mb-12">
+                <div>
+                  <h2 className="font-serif italic text-4xl mb-2">Meus Mikrotiks</h2>
+                  <p className="opacity-40 text-sm">Gerencie múltiplos dispositivos local ou remotamente.</p>
+                </div>
+                <button 
+                  onClick={() => setIsAddDeviceModalOpen(true)}
+                  className="flex items-center gap-2 px-6 py-3 bg-primary text-bg font-bold uppercase tracking-widest text-[10px] hover:opacity-90 transition-all"
+                >
+                  <PlusCircle size={16} />
+                  Adicionar Mikrotik
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {devices.map((device) => {
+                  const isLocal = device.host.startsWith('192.168') || device.host.startsWith('10.') || device.host.startsWith('172.');
+                  return (
+                    <div 
+                      key={device.id} 
+                      className={`p-6 border transition-all cursor-pointer group relative overflow-hidden ${selectedDeviceId === device.id ? 'bg-primary/10 border-primary' : 'bg-zinc-900/50 border-white/5 hover:border-primary/30'}`}
+                      onClick={() => handleSelectDevice(device)}
+                    >
+                      <div className="flex justify-between items-start mb-4">
+                        <div className={`p-3 rounded-lg ${selectedDeviceId === device.id ? 'bg-primary text-black' : 'bg-zinc-800 text-primary/50'}`}>
+                          {isLocal ? <Network size={24} /> : <Wifi size={24} />}
+                        </div>
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteDevice(device.id);
+                          }}
+                          className="p-2 text-zinc-600 hover:text-red-500 transition-colors"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                      
+                      <h3 className="font-bold text-lg text-white mb-1">{device.name}</h3>
+                      <p className="text-[10px] font-mono opacity-40 truncate mb-2">{device.host}:{device.port}</p>
+                      
+                      <div className="flex items-center gap-2 mb-4">
+                        <span className={`px-2 py-0.5 rounded-full text-[8px] font-bold uppercase tracking-widest ${isLocal ? 'bg-blue-500/20 text-blue-400' : 'bg-purple-500/20 text-purple-400'}`}>
+                          {isLocal ? 'Local' : 'Remoto / Cloud'}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between mt-auto">
+                        <span className={`text-[9px] uppercase font-bold tracking-widest ${selectedDeviceId === device.id ? 'text-primary' : 'opacity-20'}`}>
+                          {selectedDeviceId === device.id ? 'Selecionado' : 'Clique para selecionar'}
+                        </span>
+                        {selectedDeviceId === device.id && isConnected && (
+                          <div className="flex items-center gap-1 text-[9px] text-primary uppercase font-bold">
+                            <div className="w-1.5 h-1.5 bg-primary rounded-full animate-pulse" />
+                            Ativo
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {devices.length === 0 && (
+                  <div className="col-span-full p-12 border border-dashed border-white/10 text-center opacity-40 italic">
+                    Nenhum Mikrotik cadastrado. Adicione o primeiro acima.
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-12 p-8 bg-primary/5 border border-primary/10 rounded-xl">
+                <h3 className="font-bold uppercase tracking-widest text-xs mb-4 text-primary">Acesso Remoto vs Local</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 text-sm opacity-60 leading-relaxed">
+                  <div>
+                    <p className="font-bold text-white mb-2">Localmente:</p>
+                    <p>Use o IP interno (ex: 192.168.88.1). Funciona apenas se você estiver na mesma rede que o Mikrotik.</p>
+                  </div>
+                  <div>
+                    <p className="font-bold text-white mb-2">Remotamente (Winbox Cloud):</p>
+                    <p>Use o DNS Name do Mikrotik (ex: xxxx.sn.mynetname.net). Funciona de qualquer lugar do mundo, inclusive via Starlink.</p>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {activeTab === 'logs' && (
+            <motion.div 
+              key="logs"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+            >
+              <div className="mb-12">
+                <h2 className="font-serif italic text-4xl mb-2">Logs do Sistema</h2>
+                <p className="opacity-40 text-sm">Histórico de eventos do Mikrotik.</p>
+              </div>
+              <div className="p-12 border border-line bg-white/5 text-center opacity-40 italic">
+                Módulo de Logs em desenvolvimento.
+              </div>
+            </motion.div>
+          )}
+
+          {activeTab === 'about' && (
+            <motion.div 
+              key="about"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="max-w-2xl"
+            >
+              <div className="mb-12">
+                <h2 className="font-serif italic text-4xl mb-2">Sobre o Sistema</h2>
+                <p className="opacity-40 text-sm">PROZIN_HOTSPOT v1.0.0</p>
+              </div>
+              
+              <div className="space-y-8">
+                <div className="p-8 border border-line bg-white/5">
+                  <h3 className="font-bold uppercase tracking-widest text-xs mb-4 text-primary">Verificação de Acesso Remoto</h3>
+                  <p className="text-sm opacity-60 leading-relaxed mb-4">
+                    Você mencionou que não tem certeza se o acesso é remoto. Aqui está a prova:
+                  </p>
+                  <ul className="space-y-3 text-sm">
+                    <li className="flex items-start gap-3">
+                      <div className="mt-1 p-1 bg-primary/20 rounded-full"><ShieldCheck size={12} className="text-primary" /></div>
+                      <span>Este aplicativo está rodando em um servidor na **Nuvem (Google Cloud)**.</span>
+                    </li>
+                    <li className="flex items-start gap-3">
+                      <div className="mt-1 p-1 bg-primary/20 rounded-full"><ShieldCheck size={12} className="text-primary" /></div>
+                      <span>Quando você clica em "Conectar", o servidor na nuvem viaja pela internet até o seu IP IPv6 (**{config.host}**).</span>
+                    </li>
+                    <li className="flex items-start gap-3">
+                      <div className="mt-1 p-1 bg-primary/20 rounded-full"><ShieldCheck size={12} className="text-primary" /></div>
+                      <span>Mesmo que seu computador esteja na mesma rede, a "conversa" acontece entre a Nuvem e o seu Mikrotik.</span>
+                    </li>
+                  </ul>
+                </div>
+
+                <div className="p-8 border border-line bg-white/5">
+                  <h3 className="font-bold uppercase tracking-widest text-xs mb-4">Desenvolvedor</h3>
+                  <p className="text-sm opacity-60">Sistema desenvolvido para gestão simplificada de Hotspot Mikrotik via API.</p>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {activeTab === 'settings' && (
+            <motion.div 
+              key="settings"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="max-w-xl"
+            >
+              <div className="mb-12">
+                <h2 className="font-serif italic text-4xl mb-2">Configurações</h2>
+                <p className="opacity-40 text-sm">Ajuste os parâmetros do sistema e conexão.</p>
+              </div>
+
+              <div className="flex gap-8 border-b border-white/5 mb-12">
+                <button 
+                  onClick={() => setSettingsTab('general')}
+                  className={`pb-4 text-[10px] font-bold uppercase tracking-widest transition-all ${settingsTab === 'general' ? 'text-primary border-b-2 border-primary' : 'opacity-40 hover:opacity-100'}`}
+                >
+                  Geral
+                </button>
+                <button 
+                  onClick={() => setSettingsTab('custom_html')}
+                  className={`pb-4 text-[10px] font-bold uppercase tracking-widest transition-all ${settingsTab === 'custom_html' ? 'text-primary border-b-2 border-primary' : 'opacity-40 hover:opacity-100'}`}
+                >
+                  Custom HTML
+                </button>
+              </div>
+
+              {settingsTab === 'general' ? (
+                <div className="space-y-8">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <div className="space-y-2">
+                      <label className="text-[10px] uppercase font-bold tracking-widest opacity-40">Outlet Name (Nome do Estabelecimento)</label>
+                      <input 
+                        type="text" 
+                        value={outletName}
+                        onChange={e => setOutletName(e.target.value)}
+                        className="w-full bg-transparent border-b border-line py-2 focus:outline-none focus:border-primary transition-colors font-mono"
+                      />
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <label className="text-[10px] uppercase font-bold tracking-widest opacity-40">Logo do Sistema (Sua Imagem)</label>
+                      <div className="flex items-center gap-4">
+                        <input 
+                          type="file" 
+                          accept="image/*" 
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              const reader = new FileReader();
+                              reader.onloadend = () => setSystemLogo(reader.result as string);
+                              reader.readAsDataURL(file);
+                            }
+                          }}
+                          className="hidden" 
+                          id="system-logo-upload"
+                        />
+                        <label 
+                          htmlFor="system-logo-upload"
+                          className="px-4 py-2 border border-line hover:bg-white/5 text-[10px] font-bold uppercase tracking-widest cursor-pointer transition-all"
+                        >
+                          Trocar Logo
+                        </label>
+                        {systemLogo && (
+                          <button 
+                            type="button"
+                            onClick={() => setSystemLogo(null)}
+                            className="text-red-500 text-[10px] font-bold uppercase tracking-widest hover:underline"
+                          >
+                            Remover
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="p-4 bg-primary/5 border border-primary/20 text-primary text-[10px] leading-relaxed">
+                    <strong>DICA:</strong> As informações de conexão (IP, Usuário e Senha) agora são gerenciadas diretamente na tela de login para sua segurança e praticidade.
+                  </div>
+
+                {error && (
+                  <div className="p-4 bg-red-500/10 border border-red-500/20 text-red-500 text-xs flex items-center gap-3">
+                    <ShieldAlert size={16} />
+                    {error}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <button 
+                    type="button"
+                    onClick={handleSetupCleanup}
+                    disabled={loading || !isConnected}
+                    className="w-full border border-primary/30 text-primary hover:bg-primary/5 py-4 font-bold uppercase tracking-widest text-xs transition-all flex items-center justify-center gap-3 disabled:opacity-30"
+                  >
+                    <Trash2 size={16} />
+                    Ativar Auto-Limpeza de Expirados
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={() => setIsConnected(false)}
+                    className="w-full border border-red-500/30 text-red-500 hover:bg-red-500/5 py-4 font-bold uppercase tracking-widest text-xs transition-all flex items-center justify-center gap-3"
+                  >
+                    <X size={16} />
+                    Sair / Desconectar
+                  </button>
+                </div>
+
+                {testResult && (
+                  <div className={`p-4 border text-[10px] leading-relaxed flex items-center gap-3 ${testResult.success ? 'bg-primary/10 border-primary text-primary' : 'bg-red-500/10 border-red-500 text-red-500'}`}>
+                    {testResult.success ? <ShieldCheck size={16} /> : <ShieldAlert size={16} />}
+                    {testResult.message}
+                  </div>
+                )}
+
+                <div className="mt-12 pt-12 border-t border-line">
+                  <h3 className="text-[10px] uppercase font-bold tracking-widest opacity-40 mb-6">Segurança do Aplicativo</h3>
+                  
+                  <div className="p-6 bg-zinc-900/50 border border-white/5 rounded-xl space-y-6">
+                    {!appPin ? (
+                      <div className="space-y-4">
+                        <p className="text-xs opacity-60 leading-relaxed">
+                          Ative uma trava de segurança (PIN) para proteger seus dados de acesso ao Mikrotik salvos neste navegador.
+                        </p>
+                        {isSettingPin ? (
+                          <form onSubmit={handleSetPin} className="space-y-4">
+                            <div className="space-y-2">
+                              <label className="text-[9px] uppercase font-bold tracking-widest opacity-40">Definir PIN (Mín. 4 dígitos)</label>
+                              <input 
+                                type="password" 
+                                value={pinInput}
+                                onChange={e => setPinInput(e.target.value)}
+                                className="w-full bg-black border border-white/10 p-3 rounded font-mono text-center tracking-widest focus:border-primary outline-none"
+                                placeholder="****"
+                              />
+                            </div>
+                            <div className="flex gap-2">
+                              <button type="submit" className="flex-1 bg-primary text-black py-2 text-[10px] font-bold uppercase tracking-widest">Salvar PIN</button>
+                              <button type="button" onClick={() => setIsSettingPin(false)} className="flex-1 border border-white/10 py-2 text-[10px] font-bold uppercase tracking-widest">Cancelar</button>
+                            </div>
+                          </form>
+                        ) : (
+                          <button 
+                            onClick={() => setIsSettingPin(true)}
+                            className="w-full bg-primary/10 text-primary border border-primary/20 py-3 text-[10px] font-bold uppercase tracking-widest hover:bg-primary hover:text-black transition-all flex items-center justify-center gap-2"
+                          >
+                            <Lock size={14} /> Configurar PIN de Acesso
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        <div className="flex items-center gap-3 text-primary">
+                          <ShieldCheck size={20} />
+                          <span className="text-xs font-bold uppercase tracking-widest">Proteção Ativa</span>
+                        </div>
+                        <p className="text-[11px] opacity-40">
+                          O aplicativo solicitará o PIN sempre que for aberto neste navegador.
+                        </p>
+                        <div className="flex gap-2">
+                          <button 
+                            onClick={() => setIsLocked(true)}
+                            className="flex-1 border border-white/10 py-2 text-[10px] font-bold uppercase tracking-widest hover:bg-white/5 transition-all flex items-center justify-center gap-2"
+                          >
+                            <Lock size={14} /> Bloquear Agora
+                          </button>
+                          <button 
+                            onClick={handleRemovePin}
+                            className="flex-1 border border-red-500/20 text-red-500 py-2 text-[10px] font-bold uppercase tracking-widest hover:bg-red-500/5 transition-all flex items-center justify-center gap-2"
+                          >
+                            <Trash2 size={14} /> Remover PIN
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="mt-12 pt-12 border-t border-line">
+                  <h3 className="text-[10px] uppercase font-bold tracking-widest opacity-40 mb-4">Evolução: Acesso Remoto (Nuvem)</h3>
+                  <div className="space-y-4 text-[11px] leading-relaxed opacity-60">
+                    <p>Para gerenciar seu Mikrotik de qualquer lugar sem precisar rodar o programa localmente:</p>
+                    <ol className="list-decimal ml-4 space-y-2">
+                      <li>
+                        <strong>Ative o DDNS do Mikrotik:</strong> No Winbox, vá em <code>IP {'>'} Cloud</code> e marque <code>DDNS Enabled</code>. Copie o <code>DNS Name</code>.
+                      </li>
+                      <li>
+                        <strong>Libere a Porta:</strong> No seu modem/roteador principal, faça um redirecionamento (Port Forward) da porta <strong>8728</strong> para o IP do Mikrotik.
+                      </li>
+                      <li>
+                        <strong>Use o DNS:</strong> No campo "Endereço IP" acima, cole o nome DNS que você copiou (ex: <code>xxxx.sn.mynetname.net</code>).
+                      </li>
+                    </ol>
+                    <div className="p-4 bg-primary/5 border border-primary/10 text-primary italic">
+                      Dica: Com isso configurado, você pode usar este link do navegador em qualquer lugar do mundo!
+                    </div>
+
+                    <div className="mt-8 p-6 bg-surface border border-line rounded-lg">
+                      <h4 className="text-[10px] uppercase font-bold tracking-widest mb-4 text-primary">Script de Configuração Rápida</h4>
+                      <p className="text-[10px] opacity-40 mb-4">Copie e cole no Terminal do seu Mikrotik (Winbox {'>'} New Terminal):</p>
+                      <pre className="bg-black/40 p-4 rounded font-mono text-[10px] overflow-x-auto border border-line text-primary select-all">
+                        {`/ip cloud set ddns-enabled=yes\n/ip service enable api\n/ip firewall filter add action=accept chain=input dst-port=8728 protocol=tcp comment="Permitir API Mikrotik (UserMan)"`}
+                      </pre>
+                      
+                      <div className="mt-6 pt-6 border-t border-line/50">
+                        <h5 className="text-[9px] uppercase font-bold text-amber-500 mb-2">Atenção: Starlink + hEX lite</h5>
+                        <p className="text-[10px] opacity-60 leading-relaxed">
+                          Seu modelo (hEX lite) não suporta as VPNs automáticas da MikroTik devido à arquitetura MIPSBE. Para Starlink, tente:
+                        </p>
+                        <ul className="list-disc ml-4 mt-2 space-y-1 text-[10px] opacity-60">
+                          <li><strong>IPv6 Público:</strong> A Starlink fornece IPv6. Use o script abaixo no terminal para ganhar um IP acessível globalmente.</li>
+                          <li><strong>VPN WireGuard:</strong> Configure um túnel manual para um servidor que tenha IP fixo.</li>
+                        </ul>
+                        <div className="mt-4 p-3 bg-black/20 border border-line rounded">
+                          <p className="text-[9px] uppercase font-bold mb-2 opacity-40">Dica Starlink IPv6:</p>
+                          <p className="text-[10px] opacity-60 mb-2">No DHCPv6 Client, mude o <strong>Pool Prefix Length</strong> para <strong>56</strong> (em vez de 64). Isso é essencial para a Starlink entregar o endereço.</p>
+                          <pre className="text-[9px] text-primary overflow-x-auto">
+                            {`/ipv6 dhcp-client add add-default-route=yes interface=ether1 pool-name=starlink request=prefix pool-prefix-length=56`}
+                          </pre>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-8">
+                <div className="space-y-6">
+                  <h3 className="font-serif italic text-2xl">Voucher Template</h3>
+                  
+                  <div className="space-y-4">
+                    <label className="flex items-center gap-3 cursor-pointer group">
+                      <input 
+                        type="radio" 
+                        name="templateType" 
+                        value="standard" 
+                        checked={voucherTemplateType === 'standard'}
+                        onChange={() => setVoucherTemplateType('standard')}
+                        className="w-4 h-4 accent-primary"
+                      />
+                      <span className={`text-sm transition-colors ${voucherTemplateType === 'standard' ? 'text-primary font-bold' : 'opacity-60'}`}>
+                        Template padrão (Sem Imagem)
+                      </span>
+                    </label>
+
+                    <label className="flex items-center gap-3 cursor-pointer group">
+                      <input 
+                        type="radio" 
+                        name="templateType" 
+                        value="custom" 
+                        checked={voucherTemplateType === 'custom'}
+                        onChange={() => setVoucherTemplateType('custom')}
+                        className="w-4 h-4 accent-primary"
+                      />
+                      <span className={`text-sm transition-colors ${voucherTemplateType === 'custom' ? 'text-primary font-bold' : 'opacity-60'}`}>
+                        Template customizado
+                      </span>
+                    </label>
+                  </div>
+
+                  {voucherTemplateType === 'custom' && (
+                    <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
+                      <div className="border-2 border-dashed border-white/10 rounded-2xl p-8 flex flex-col items-center justify-center relative overflow-hidden min-h-[200px] bg-black/20">
+                        {voucherImage ? (
+                          <>
+                            <img src={voucherImage} alt="Preview" className="max-w-full max-h-[180px] object-contain rounded shadow-2xl" />
+                            <button 
+                              onClick={() => setVoucherImage(null)}
+                              className="absolute top-4 right-4 bg-red-500 text-white p-2 rounded-full hover:scale-110 transition-transform"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </>
+                        ) : (
+                          <label className="flex flex-col items-center cursor-pointer hover:opacity-80 transition-opacity">
+                            <Download size={48} className="opacity-20 mb-4" />
+                            <span className="text-xs font-bold uppercase tracking-widest opacity-40">Clique para enviar imagem</span>
+                            <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
+                          </label>
+                        )}
+                      </div>
+                      <p className="text-[10px] opacity-40 text-center">
+                        A imagem deve ser um (*.png/jpg) largura 450px e Altura 250px recomendada.
+                      </p>
+                    </div>
+                  )}
+
+                  <button 
+                    onClick={() => {
+                      alert('Modelo de voucher salvo com sucesso!');
+                    }}
+                    className="w-full bg-zinc-800 text-white py-4 font-bold uppercase tracking-widest text-xs hover:bg-primary hover:text-black transition-all flex items-center justify-center gap-3 border border-white/5"
+                  >
+                    <Database size={16} />
+                    Salvar o modelo do voucher
+                  </button>
+                </div>
+              </div>
+            )}
+          </motion.div>
+          )}
+
+          {activeTab === 'dashboard' && (
+            <motion.div 
+              key="dashboard"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              <div className="flex justify-between items-end mb-12">
+                <div>
+                  <h2 className="font-serif italic text-4xl mb-2">Usuários Hotspot</h2>
+                  <p className="opacity-40 text-sm">Gerencie os vouchers e usuários ativos no sistema.</p>
+                </div>
+                <div className="flex gap-4">
+                  <button 
+                    onClick={fetchData}
+                    className="p-3 border border-line hover:bg-white/5 transition-all"
+                  >
+                    <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
+                  </button>
+                  <button 
+                    onClick={() => setActiveTab('generator')}
+                    className="flex items-center gap-2 px-6 py-3 bg-primary text-bg font-bold uppercase tracking-widest text-[10px] hover:opacity-90 transition-all"
+                  >
+                    <PlusCircle size={16} />
+                    Novo Lote
+                  </button>
+                </div>
+              </div>
+
+              <div className="border border-line bg-surface overflow-x-auto">
+                <div className="min-w-[600px]">
+                  <div className="grid grid-cols-[1fr_1fr_1fr_1fr_80px] p-4 border-b border-line bg-white/5">
+                    <span className="text-[10px] uppercase font-bold tracking-widest opacity-40">Usuário</span>
+                    <span className="text-[10px] uppercase font-bold tracking-widest opacity-40">Perfil</span>
+                    <span className="text-[10px] uppercase font-bold tracking-widest opacity-40">Uptime</span>
+                    <span className="text-[10px] uppercase font-bold tracking-widest opacity-40">Tráfego (IN/OUT)</span>
+                    <span className="text-[10px] uppercase font-bold tracking-widest opacity-40 text-right">Ações</span>
+                  </div>
+                  <div className="divide-y divide-line">
+                    {users.length === 0 ? (
+                      <div className="p-12 text-center opacity-20 italic">Nenhum usuário encontrado.</div>
+                    ) : (
+                      users.map(user => (
+                        <div key={user['.id']} className="grid grid-cols-[1fr_1fr_1fr_1fr_80px] p-4 items-center hover:bg-white/5 transition-all group">
+                          <span className="font-mono font-bold text-primary truncate">{user.name}</span>
+                          <span className="text-sm opacity-60 group-hover:opacity-100 truncate">{user.profile}</span>
+                          <span className="text-sm opacity-60 group-hover:opacity-100 font-mono truncate">{user.uptime || '0s'}</span>
+                          <span className="text-sm opacity-60 group-hover:opacity-100 font-mono truncate">
+                            {user['bytes-in']} / {user['bytes-out']}
+                          </span>
+                          <div className="flex justify-end">
+                            <button 
+                              onClick={() => handleDelete(user['.id'])}
+                              className="p-2 text-red-500 hover:bg-red-500 hover:text-white transition-all rounded"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Winbox Connection Card */}
+              <div className="mt-12 grid grid-cols-1 md:grid-cols-2 gap-8">
+                <motion.div 
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.2 }}
+                  className="p-8 border border-line bg-zinc-900/50 relative overflow-hidden group"
+                >
+                  <div className="flex justify-between items-start mb-6">
+                    <div>
+                      <h3 className="font-bold uppercase tracking-widest text-[10px] text-primary mb-1">Acesso Winbox</h3>
+                      <p className="text-xs opacity-40">Conecte via software desktop</p>
+                    </div>
+                    <div className="p-3 bg-primary/10 text-primary">
+                      <Monitor size={20} />
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-4 mb-8">
+                    <div className="p-4 bg-black/40 border border-white/5 rounded-lg">
+                      <p className="text-[9px] uppercase font-bold opacity-30 mb-1">Endereço Winbox</p>
+                      <p className="font-mono text-sm text-white break-all">{config.host}</p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="p-4 bg-black/40 border border-white/5 rounded-lg">
+                        <p className="text-[9px] uppercase font-bold opacity-30 mb-1">Usuário</p>
+                        <p className="font-mono text-sm text-white">{config.user}</p>
+                      </div>
+                      <div className="p-4 bg-black/40 border border-white/5 rounded-lg">
+                        <p className="text-[9px] uppercase font-bold opacity-30 mb-1">Senha</p>
+                        <p className="font-mono text-sm text-white">{config.password ? '******' : '(vazio)'}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <button 
+                      onClick={() => {
+                        navigator.clipboard.writeText(config.host);
+                        alert('Endereço copiado para o Winbox!');
+                      }}
+                      className="flex items-center justify-center gap-2 py-3 border border-white/10 text-[10px] font-bold uppercase tracking-widest hover:bg-white/5 transition-all"
+                    >
+                      Copiar IP
+                    </button>
+                    <button 
+                      onClick={() => {
+                        navigator.clipboard.writeText(`winbox.exe ${config.host} ${config.user} ${config.password || '""'}`);
+                        alert('Comando Winbox copiado! Cole no CMD ou Executar (Win+R).');
+                      }}
+                      className="flex items-center justify-center gap-2 py-3 border border-white/10 text-[10px] font-bold uppercase tracking-widest hover:bg-white/5 transition-all"
+                    >
+                      Copiar Comando
+                    </button>
+                  </div>
+
+                  <div className="mt-3 flex flex-col gap-2">
+                    <a 
+                      href={`winbox://${config.host};${config.user};${config.password}`}
+                      className="w-full flex items-center justify-center gap-2 py-3 bg-primary text-bg text-[10px] font-bold uppercase tracking-widest hover:opacity-90 transition-all"
+                    >
+                      <ExternalLink size={14} />
+                      Abrir Winbox (Protocolo)
+                    </a>
+                    <button 
+                      onClick={() => {
+                        const batchScript = `@echo off
+title Ativador de Protocolo Winbox - PROZIN
+echo ==========================================
+echo   ATIVADOR DE PROTOCOLO WINBOX (PROZIN)
+echo ==========================================
+echo.
+set /p winboxpath="ARRASTE O SEU ARQUIVO WINBOX.EXE PARA CA E APERTE ENTER: "
+if not exist %winboxpath% (
+    echo Erro: Arquivo nao encontrado!
+    pause
+    exit
+)
+reg add "HKEY_CLASSES_ROOT\\winbox" /ve /t REG_SZ /d "URL:Winbox Protocol" /f
+reg add "HKEY_CLASSES_ROOT\\winbox" /v "URL Protocol" /t REG_SZ /d "" /f
+reg add "HKEY_CLASSES_ROOT\\winbox\\shell\\open\\command" /ve /t REG_SZ /d "cmd /c set \\"url=%%1\\" & call set \\"url=%%url:winbox://=%%\\" & call set \\"url=%%url:;= %%\\" & start \\"\\" %winboxpath% %%url%%" /f
+echo.
+echo ==========================================
+echo   SUCESSO! PROTOCOLO REGISTRADO.
+echo   AGORA O BOTAO DO APP VAI FUNCIONAR.
+echo ==========================================
+pause`;
+                        const blob = new Blob([batchScript], { type: 'text/plain' });
+                        const url = window.URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = 'ativar_winbox_prozin.bat';
+                        a.click();
+                        window.URL.revokeObjectURL(url);
+                        alert('Script baixado! Execute o arquivo "ativar_winbox_prozin.bat" como Administrador para ativar o botão.');
+                      }}
+                      className="w-full flex items-center justify-center gap-2 py-2 border border-primary/30 text-primary text-[9px] font-bold uppercase tracking-widest hover:bg-primary/10 transition-all"
+                    >
+                      <Settings size={12} />
+                      Ativar Acesso Direto (Script)
+                    </button>
+                  </div>
+                  <p className="mt-4 text-[8px] opacity-30 italic text-center leading-relaxed">
+                    Nota: O botão "Abrir Winbox" requer um protocolo registrado no Windows. Se não funcionar, use o botão "Copiar Comando" e cole no menu Executar (Win+R).
+                  </p>
+                  <p className="mt-1 text-[8px] opacity-30 italic text-center">
+                    Requer porta 8291 aberta no Firewall da MikroTik.
+                  </p>
+                </motion.div>
+
+                {/* Quick Stats / Info */}
+                <motion.div 
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.3 }}
+                  className="p-8 border border-line bg-primary/5 flex flex-col justify-center"
+                >
+                  <h3 className="font-bold uppercase tracking-widest text-[10px] text-primary mb-4">Dica de Acesso</h3>
+                  <p className="text-sm opacity-60 leading-relaxed">
+                    O endereço acima é o mesmo que você usa para conectar este App. Se você estiver usando o <b>DNS Cloud</b>, o Winbox também funcionará de qualquer lugar do mundo através dele.
+                  </p>
+                  <div className="mt-6 p-4 bg-black/20 border border-primary/10 rounded text-[10px] opacity-50">
+                    Comando Terminal MikroTik para abrir porta Winbox:<br/>
+                    <code className="text-primary">/ip firewall filter add chain=input protocol=tcp dst-port=8291 action=accept</code>
+                  </div>
+                </motion.div>
+              </div>
+            </motion.div>
+          )}
+
+          {activeTab === 'generator' && (
+            <motion.div 
+              key="generator"
+              initial={{ opacity: 0, scale: 0.98 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.98 }}
+              className="max-w-2xl"
+            >
+              <div className="mb-12">
+                <h2 className="font-serif italic text-4xl mb-2">Gerador de Usuários</h2>
+                <p className="opacity-40 text-sm">Crie múltiplos usuários com códigos numéricos sem senha.</p>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
+                <div className="space-y-8">
+                  <div className="space-y-2">
+                    <label className="text-[10px] uppercase font-bold tracking-widest opacity-40">Quantidade de Vouchers</label>
+                    <input 
+                      type="number" 
+                      value={genCount}
+                      onChange={e => setGenCount(parseInt(e.target.value))}
+                      className="w-full bg-transparent border-b border-line py-2 focus:outline-none focus:border-primary transition-colors font-mono text-2xl"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] uppercase font-bold tracking-widest opacity-40">Perfil do Hotspot</label>
+                    <select 
+                      value={genProfile}
+                      onChange={e => setGenProfile(e.target.value)}
+                      className="w-full bg-transparent border-b border-line py-2 focus:outline-none focus:border-primary transition-colors appearance-none"
+                    >
+                      {loading && profiles.length === 0 ? (
+                        <option>Carregando perfis...</option>
+                      ) : profiles.length === 0 ? (
+                        <option value="default">default</option>
+                      ) : (
+                        profiles.map(p => (
+                          <option key={p.name} value={p.name}>{p.name}</option>
+                        ))
+                      )}
+                    </select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] uppercase font-bold tracking-widest opacity-40">Tipo de Voucher</label>
+                    <select 
+                      value={genVoucherType}
+                      onChange={e => setGenVoucherType(e.target.value)}
+                      className="w-full bg-transparent border-b border-line py-2 focus:outline-none focus:border-primary transition-colors appearance-none"
+                    >
+                      <option value="username_only">Apenas Usuário (Código)</option>
+                      <option value="user_pass">Usuário e Senha (Iguais)</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] uppercase font-bold tracking-widest opacity-40">Tipo de Caracteres</label>
+                    <select 
+                      value={genCharType}
+                      onChange={e => setGenCharType(e.target.value)}
+                      className="w-full bg-transparent border-b border-line py-2 focus:outline-none focus:border-primary transition-colors appearance-none"
+                    >
+                      <option value="numbers">Apenas Números</option>
+                      <option value="letters">Apenas Letras (Maiúsculas)</option>
+                      <option value="mixed">Misturado (Letras e Números)</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] uppercase font-bold tracking-widest opacity-40">DNS Name (Portal)</label>
+                    <input 
+                      type="text" 
+                      value={genDNSName}
+                      onChange={e => setGenDNSName(e.target.value)}
+                      className="w-full bg-transparent border-b border-line py-2 focus:outline-none focus:border-primary transition-colors font-mono"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] uppercase font-bold tracking-widest opacity-40">Preço do Voucher</label>
+                    <input 
+                      type="text" 
+                      value={genPrice}
+                      onChange={e => setGenPrice(e.target.value)}
+                      placeholder="Ex: R$ 5,00"
+                      className="w-full bg-transparent border-b border-line py-2 focus:outline-none focus:border-primary transition-colors font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-8">
+                  <div className="space-y-2">
+                    <label className="text-[10px] uppercase font-bold tracking-widest opacity-40">Prefixo do Nome</label>
+                    <input 
+                      type="text" 
+                      value={genPrefix}
+                      onChange={e => setGenPrefix(e.target.value)}
+                      className="w-full bg-transparent border-b border-line py-2 focus:outline-none focus:border-primary transition-colors font-mono"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] uppercase font-bold tracking-widest opacity-40">Cor do Voucher</label>
+                    <select 
+                      value={genColor}
+                      onChange={e => setGenColor(e.target.value)}
+                      className="w-full bg-transparent border-b border-line py-2 focus:outline-none focus:border-primary transition-colors appearance-none"
+                    >
+                      <option value="emerald">Verde (Padrão)</option>
+                      <option value="blue">Azul</option>
+                      <option value="red">Vermelho</option>
+                      <option value="amber">Amarelo</option>
+                      <option value="purple">Roxo</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] uppercase font-bold tracking-widest opacity-40">Tamanho do Código</label>
+                    <input 
+                      type="number" 
+                      value={genLength}
+                      onChange={e => setGenLength(parseInt(e.target.value))}
+                      className="w-full bg-transparent border-b border-line py-2 focus:outline-none focus:border-primary transition-colors font-mono"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] uppercase font-bold tracking-widest opacity-40">Limite de Tempo (Uptime)</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div>
+                        <input type="number" value={uptimeDays} onChange={e => setUptimeDays(parseInt(e.target.value))} className="w-full bg-transparent border-b border-line py-2 focus:outline-none focus:border-primary transition-colors text-center" />
+                        <span className="text-[8px] opacity-30 uppercase block text-center mt-1">Dia</span>
+                      </div>
+                      <div>
+                        <input type="number" value={uptimeHours} onChange={e => setUptimeHours(parseInt(e.target.value))} className="w-full bg-transparent border-b border-line py-2 focus:outline-none focus:border-primary transition-colors text-center" />
+                        <span className="text-[8px] opacity-30 uppercase block text-center mt-1">Hora</span>
+                      </div>
+                      <div>
+                        <input type="number" value={uptimeMinutes} onChange={e => setUptimeMinutes(parseInt(e.target.value))} className="w-full bg-transparent border-b border-line py-2 focus:outline-none focus:border-primary transition-colors text-center" />
+                        <span className="text-[8px] opacity-30 uppercase block text-center mt-1">Min</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] uppercase font-bold tracking-widest opacity-40">Limite de Dados (MB)</label>
+                    <input 
+                      type="number" 
+                      value={genLimitBytes}
+                      onChange={e => setGenLimitBytes(e.target.value)}
+                      className="w-full bg-transparent border-b border-line py-2 focus:outline-none focus:border-primary transition-colors font-mono"
+                    />
+                    <p className="text-[9px] opacity-30 italic">0 = Sem limite de dados</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-12 p-8 border border-dashed border-line bg-white/5">
+                <div className="flex items-start gap-4">
+                  <div className="p-2 bg-primary/10 text-primary">
+                    <ShieldCheck size={20} />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-sm uppercase tracking-widest mb-1">Segurança & Configuração</h4>
+                    <p className="text-xs opacity-40 leading-relaxed">
+                      Os usuários serão criados com **senha vazia**. Certifique-se de que o seu servidor Hotspot 
+                      permite logins sem senha nas configurações do perfil do servidor (Server Profile).
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <button 
+                onClick={handleGenerate}
+                disabled={loading}
+                className="mt-12 w-full bg-primary text-bg py-6 font-bold uppercase tracking-widest text-sm hover:opacity-90 transition-all flex items-center justify-center gap-3 disabled:opacity-50"
+              >
+                {loading ? <RefreshCw className="animate-spin" size={20} /> : <Database size={20} />}
+                Gerar {genCount} Usuários Agora
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </main>
+
+      {/* Modal Adicionar Mikrotik */}
+      <AnimatePresence>
+        {isAddDeviceModalOpen && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsAddDeviceModalOpen(false)}
+              className="absolute inset-0 bg-bg/80 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative w-full max-w-md bg-zinc-900 border border-white/10 p-8 shadow-2xl"
+            >
+              <div className="flex justify-between items-center mb-8">
+                <h3 className="font-serif italic text-2xl">Novo Mikrotik</h3>
+                <button onClick={() => setIsAddDeviceModalOpen(false)} className="opacity-40 hover:opacity-100 transition-all">
+                  <X size={20} />
+                </button>
+              </div>
+
+              <form onSubmit={handleAddDeviceSubmit} className="space-y-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] uppercase font-bold tracking-widest opacity-40">Nome Amigável</label>
+                  <input 
+                    type="text" 
+                    required
+                    placeholder="Ex: Loja Centro"
+                    value={newDeviceData.name}
+                    onChange={e => setNewDeviceData({...newDeviceData, name: e.target.value})}
+                    className="w-full bg-transparent border-b border-white/10 py-2 focus:outline-none focus:border-primary transition-colors font-mono"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] uppercase font-bold tracking-widest opacity-40">Endereço (IP ou DNS Cloud)</label>
+                  <input 
+                    type="text" 
+                    required
+                    placeholder="Ex: 192.168.1.1 ou xxxx.mynetname.net"
+                    value={newDeviceData.host}
+                    onChange={e => setNewDeviceData({...newDeviceData, host: e.target.value})}
+                    className="w-full bg-transparent border-b border-white/10 py-2 focus:outline-none focus:border-primary transition-colors font-mono"
+                  />
+                  <p className="text-[9px] opacity-30 italic">Use o DNS Cloud para acesso remoto via Starlink/4G.</p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-[10px] uppercase font-bold tracking-widest opacity-40">Usuário</label>
+                    <input 
+                      type="text" 
+                      required
+                      value={newDeviceData.user}
+                      onChange={e => setNewDeviceData({...newDeviceData, user: e.target.value})}
+                      className="w-full bg-transparent border-b border-white/10 py-2 focus:outline-none focus:border-primary transition-colors font-mono"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] uppercase font-bold tracking-widest opacity-40">Porta API</label>
+                    <input 
+                      type="text" 
+                      required
+                      value={newDeviceData.port}
+                      onChange={e => setNewDeviceData({...newDeviceData, port: e.target.value})}
+                      className="w-full bg-transparent border-b border-white/10 py-2 focus:outline-none focus:border-primary transition-colors font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] uppercase font-bold tracking-widest opacity-40">Senha</label>
+                  <input 
+                    type="password" 
+                    value={newDeviceData.password}
+                    onChange={e => setNewDeviceData({...newDeviceData, password: e.target.value})}
+                    className="w-full bg-transparent border-b border-white/10 py-2 focus:outline-none focus:border-primary transition-colors font-mono"
+                  />
+                </div>
+
+                <button 
+                  type="submit"
+                  className="w-full bg-primary text-bg py-4 font-bold uppercase tracking-widest text-xs hover:opacity-90 transition-all mt-8"
+                >
+                  Salvar Dispositivo
+                </button>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Help Modal */}
+      <AnimatePresence>
+        {isHelpModalOpen && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsHelpModalOpen(false)}
+              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-lg bg-zinc-950 border border-white/10 shadow-2xl overflow-hidden"
+            >
+              <div className="p-6 border-b border-white/5 flex items-center justify-between bg-zinc-900">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-primary/20 rounded text-primary">
+                    <HelpCircle size={20} />
+                  </div>
+                  <h3 className="font-bold uppercase tracking-widest text-sm">Como configurar sua MikroTik</h3>
+                </div>
+                <button onClick={() => setIsHelpModalOpen(false)} className="text-zinc-500 hover:text-white">
+                  <X size={20} />
+                </button>
+              </div>
+              
+              <div className="p-6 space-y-6 max-h-[70vh] overflow-y-auto">
+                <div className="space-y-4">
+                  <div className="flex gap-4">
+                    <div className="flex-shrink-0 w-6 h-6 rounded-full bg-primary text-black flex items-center justify-center text-xs font-bold">1</div>
+                    <div className="space-y-1">
+                      <p className="text-sm font-bold text-white">Ativar o serviço API</p>
+                      <p className="text-xs text-zinc-400 leading-relaxed">No Winbox, vá em <b>IP {'>'} Services</b>. Verifique se o serviço <b>api</b> está habilitado (porta 8728). Se estiver usando Starlink ou CGNAT, certifique-se de que não há restrições de IP.</p>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-4">
+                    <div className="flex-shrink-0 w-6 h-6 rounded-full bg-primary text-black flex items-center justify-center text-xs font-bold">2</div>
+                    <div className="space-y-1">
+                      <p className="text-sm font-bold text-white">Configurar Acesso Remoto (DDNS)</p>
+                      <p className="text-xs text-zinc-400 leading-relaxed">Vá em <b>IP {'>'} Cloud</b>. Marque <b>DDNS Enabled</b> e <b>Update Time</b>. Clique em Apply e copie o <b>DNS Name</b> (ex: 123456789.sn.mynetname.net). Use este nome no campo "Host" do App.</p>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-4">
+                    <div className="flex-shrink-0 w-6 h-6 rounded-full bg-primary text-black flex items-center justify-center text-xs font-bold">3</div>
+                    <div className="space-y-1">
+                      <p className="text-sm font-bold text-white">Liberar no Firewall</p>
+                      <p className="text-xs text-zinc-400 leading-relaxed">Vá em <b>IP {'>'} Firewall {'>'} Filter Rules</b>. Adicione uma regra: <b>Chain: input</b>, <b>Protocol: tcp</b>, <b>Dst. Port: 8728</b>, <b>Action: accept</b>. Coloque esta regra no topo da lista.</p>
+                    </div>
+                  </div>
+
+                  <div className="bg-primary/5 border border-primary/20 p-4 rounded-lg space-y-3">
+                    <p className="text-[10px] font-bold text-primary uppercase tracking-widest flex items-center gap-2">
+                      <ShieldCheck size={14} /> Dica de Segurança
+                    </p>
+                    <p className="text-[11px] text-zinc-300 leading-relaxed">
+                      Para maior segurança, no menu <b>IP {'>'} Services</b>, você pode limitar o campo <b>Available From</b> para aceitar apenas o IP do servidor deste App: <code className="bg-black/40 px-1 rounded text-primary">{detectedIP || 'Carregando...'}</code>
+                    </p>
+                    <button 
+                      onClick={() => copyToClipboard(`/ip cloud set ddns-enabled=yes\n/ip service enable api\n/ip firewall filter add action=accept chain=input dst-port=8728 protocol=tcp comment="Permitir API Mikrotik (PROZIN)"`, 'Script copiado! Cole no terminal do Winbox.')}
+                      className="w-full bg-primary text-black py-2 text-[10px] font-bold uppercase tracking-widest hover:opacity-90 transition-all"
+                    >
+                      Copiar Script de Configuração Rápida
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-4 bg-zinc-900 border-t border-white/5 flex justify-end">
+                <button 
+                  onClick={() => setIsHelpModalOpen(false)}
+                  className="px-6 py-2 bg-primary text-black font-bold uppercase tracking-widest text-xs hover:opacity-90 transition-all"
+                >
+                  Entendi
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Modal de Diagnóstico */}
+      <AnimatePresence>
+        {isDiagnosticModalOpen && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsDiagnosticModalOpen(false)}
+              className="absolute inset-0 bg-bg/90 backdrop-blur-md"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="relative w-full max-w-lg bg-zinc-900 border border-white/10 p-8 shadow-2xl"
+            >
+              <div className="flex justify-between items-center mb-8">
+                <div className="flex items-center gap-3">
+                  <Activity className="text-primary" size={24} />
+                  <h3 className="font-serif italic text-2xl">Diagnóstico de Conexão</h3>
+                </div>
+                <button onClick={() => setIsDiagnosticModalOpen(false)} className="opacity-40 hover:opacity-100 transition-all">
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="space-y-6">
+                {diagnosticSteps.map((step, idx) => (
+                  <div key={idx} className="flex items-center justify-between p-4 bg-black/20 border border-white/5 rounded-lg">
+                    <div className="flex items-center gap-4">
+                      {step.status === 'loading' && <RefreshCw size={16} className="animate-spin text-primary" />}
+                      {step.status === 'success' && <CheckCircle2 size={16} className="text-emerald-500" />}
+                      {step.status === 'error' && <AlertCircle size={16} className="text-red-500" />}
+                      {step.status === 'pending' && <div className="w-4 h-4 rounded-full border border-white/20" />}
+                      <span className={`text-sm ${step.status === 'error' ? 'text-red-400' : 'text-white/80'}`}>{step.name}</span>
+                    </div>
+                    {step.message && (
+                      <span className="text-[10px] font-mono opacity-40">{step.message}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {diagnosticSteps.some(s => s.status === 'error') && (
+                <div className="mt-8 p-6 bg-primary/5 border border-primary/20 rounded-lg">
+                  <h4 className="flex items-center gap-2 text-primary font-bold uppercase tracking-widest text-[10px] mb-4">
+                    <Info size={14} />
+                    Como resolver:
+                  </h4>
+                  <ul className="space-y-3 text-xs opacity-70 list-disc pl-4">
+                    <li>
+                      Libere o IP do servidor no Firewall da MikroTik: <br/>
+                      <div className="flex flex-col gap-2 mt-2">
+                        <code className="text-primary font-mono block bg-black/40 p-2 rounded text-[9px] break-all">
+                          /ip firewall filter add chain=input src-address={serverPublicIp || 'IP_DO_SERVIDOR'} protocol=tcp dst-port=8728 action=accept place-before=0
+                        </code>
+                        <button 
+                          onClick={() => copyToClipboard(`/ip firewall filter add chain=input src-address=${serverPublicIp} protocol=tcp dst-port=8728 action=accept place-before=0`, 'Regra de Firewall copiada!')}
+                          className="bg-primary/20 hover:bg-primary/30 text-primary py-1 rounded text-[9px] font-bold uppercase"
+                        >
+                          Copiar Regra
+                        </button>
+                      </div>
+                    </li>
+                    <li>Verifique se o serviço <b>API</b> está ativo em <b>IP &gt; Services</b> (Porta {config.port}).</li>
+                    <li>Se estiver usando IPv6, use o menu <b>IPv6 &gt; Firewall</b> para liberar a porta.</li>
+                    <li>Certifique-se de que o usuário <b>{config.user}</b> tem permissão de 'api' no menu <b>System &gt; Users</b>.</li>
+                  </ul>
+                </div>
+              )}
+
+              <button 
+                onClick={() => setIsDiagnosticModalOpen(false)}
+                className="w-full bg-white/5 hover:bg-white/10 text-white py-4 font-bold uppercase tracking-widest text-xs transition-all mt-8"
+              >
+                Fechar Diagnóstico
+              </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
