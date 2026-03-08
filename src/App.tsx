@@ -31,7 +31,14 @@ import {
   Monitor,
   CheckCircle2,
   AlertCircle,
-  HelpCircle
+  HelpCircle,
+  MessageSquare,
+  QrCode,
+  CreditCard,
+  Calendar,
+  UserPlus,
+  Power,
+  PowerOff
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -173,7 +180,127 @@ export default function App() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'generator' | 'settings' | 'hotspot' | 'ppp' | 'logs' | 'about' | 'devices'>('settings');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'generator' | 'settings' | 'hotspot' | 'ppp' | 'logs' | 'about' | 'devices' | 'financeiro'>('settings');
+  
+  // WhatsApp State
+  const [whatsappStatus, setWhatsappStatus] = useState<'disconnected' | 'qr_ready' | 'connected'>('disconnected');
+  const [whatsappQr, setWhatsappQr] = useState<string | null>(null);
+  const [customers, setCustomers] = useState<any[]>([]);
+  const [financeSettings, setFinanceSettings] = useState({
+    pixKey: '',
+    pixName: '',
+    pixCity: ''
+  });
+
+  useEffect(() => {
+    if (activeTab === 'financeiro') {
+      fetchWhatsappStatus();
+      fetchCustomers();
+      fetchFinanceSettings();
+      
+      const interval = setInterval(() => {
+        fetchWhatsappStatus();
+      }, 5000);
+      return () => clearInterval(interval);
+    }
+  }, [activeTab]);
+
+  const fetchWhatsappStatus = async () => {
+    try {
+      const res = await fetch('/api/whatsapp/status');
+      const data = await res.json();
+      setWhatsappStatus(data.status);
+      setWhatsappQr(data.qr);
+    } catch (err) {
+      console.error('Erro ao buscar status do WhatsApp:', err);
+    }
+  };
+
+  const fetchCustomers = async () => {
+    try {
+      const res = await fetch('/api/customers');
+      const data = await res.json();
+      setCustomers(data);
+    } catch (err) {
+      console.error('Erro ao buscar clientes:', err);
+    }
+  };
+
+  const fetchFinanceSettings = async () => {
+    try {
+      const res = await fetch('/api/settings');
+      const data = await res.json();
+      setFinanceSettings(data);
+    } catch (err) {
+      console.error('Erro ao buscar configurações financeiras:', err);
+    }
+  };
+
+  const handleSaveFinanceSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(financeSettings)
+      });
+      alert('Configurações salvas com sucesso!');
+    } catch (err) {
+      alert('Erro ao salvar configurações');
+    }
+  };
+
+  const handleAddCustomer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const formData = new FormData(e.currentTarget as HTMLFormElement);
+    const newCustomer = {
+      name: formData.get('name'),
+      phone: formData.get('phone'),
+      value: formData.get('value'),
+      dueDay: parseInt(formData.get('dueDay') as string),
+      mikrotikUser: formData.get('mikrotikUser')
+    };
+
+    try {
+      const res = await fetch('/api/customers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newCustomer)
+      });
+      if (res.ok) {
+        fetchCustomers();
+        (e.target as HTMLFormElement).reset();
+      }
+    } catch (err) {
+      alert('Erro ao adicionar cliente');
+    }
+  };
+
+  const handleDeleteCustomer = async (id: string) => {
+    if (!window.confirm('Excluir este cliente?')) return;
+    try {
+      await fetch(`/api/customers/${id}`, { method: 'DELETE' });
+      fetchCustomers();
+    } catch (err) {
+      alert('Erro ao excluir cliente');
+    }
+  };
+
+  const handlePayCustomer = async (id: string) => {
+    try {
+      const res = await fetch(`/api/customers/${id}/pay`, { 
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config)
+      });
+      if (res.ok) {
+        fetchCustomers();
+        alert('Pagamento confirmado e cliente reativado!');
+      }
+    } catch (err) {
+      alert('Erro ao confirmar pagamento');
+    }
+  };
   
   // Generator state
   const [genCount, setGenCount] = useState(10);
@@ -968,6 +1095,16 @@ export default function App() {
                 <Network size={18} />
                 PPP
               </button>
+              <button 
+                onClick={() => {
+                  setActiveTab('financeiro');
+                  setIsMobileMenuOpen(false);
+                }}
+                className={`w-full flex items-center gap-4 px-8 py-4 text-sm font-medium transition-all ${activeTab === 'financeiro' ? 'bg-primary text-black' : 'hover:bg-white/5 opacity-40 hover:opacity-100'}`}
+              >
+                <CreditCard size={18} />
+                Financeiro
+              </button>
             </>
           )}
           
@@ -1644,6 +1781,199 @@ export default function App() {
               </div>
             )}
           </motion.div>
+          )}
+
+          {activeTab === 'financeiro' && (
+            <motion.div 
+              key="financeiro"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+            >
+              <div className="mb-12">
+                <h2 className="font-serif italic text-4xl mb-2">Financeiro & Cobrança</h2>
+                <p className="opacity-40 text-sm">Gestão de clientes, pagamentos e automação via WhatsApp.</p>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                {/* WhatsApp Status Card */}
+                <div className="lg:col-span-1 space-y-8">
+                  <div className="p-8 border border-line bg-zinc-900/50 rounded-xl">
+                    <div className="flex items-center justify-between mb-6">
+                      <h3 className="font-bold uppercase tracking-widest text-[10px] text-primary">Status WhatsApp</h3>
+                      <div className={`flex items-center gap-2 text-[10px] font-bold uppercase ${
+                        whatsappStatus === 'connected' ? 'text-emerald-500' : 
+                        whatsappStatus === 'qr_ready' ? 'text-amber-500' : 'text-red-500'
+                      }`}>
+                        <div className={`w-2 h-2 rounded-full ${
+                          whatsappStatus === 'connected' ? 'bg-emerald-500 animate-pulse' : 
+                          whatsappStatus === 'qr_ready' ? 'bg-amber-500 animate-pulse' : 'bg-red-500'
+                        }`} />
+                        {whatsappStatus === 'connected' ? 'Conectado' : 
+                         whatsappStatus === 'qr_ready' ? 'Aguardando QR' : 'Desconectado'}
+                      </div>
+                    </div>
+
+                    {whatsappStatus === 'qr_ready' && whatsappQr ? (
+                      <div className="flex flex-col items-center space-y-4">
+                        <div className="p-4 bg-white rounded-lg">
+                          <img src={whatsappQr} alt="WhatsApp QR Code" className="w-48 h-48" />
+                        </div>
+                        <p className="text-[10px] text-center opacity-60 uppercase tracking-widest leading-relaxed">
+                          Escaneie este QR Code com seu WhatsApp para ativar as cobranças automáticas.
+                        </p>
+                      </div>
+                    ) : whatsappStatus === 'connected' ? (
+                      <div className="text-center py-8 space-y-4">
+                        <div className="p-4 bg-emerald-500/10 text-emerald-500 rounded-full inline-block">
+                          <CheckCircle2 size={48} />
+                        </div>
+                        <p className="text-sm opacity-60">WhatsApp pareado com sucesso. O sistema enviará cobranças automaticamente.</p>
+                      </div>
+                    ) : (
+                      <div className="text-center py-8 space-y-4">
+                        <div className="p-4 bg-red-500/10 text-red-500 rounded-full inline-block">
+                          <AlertCircle size={48} />
+                        </div>
+                        <p className="text-sm opacity-60">WhatsApp desconectado. Reinicie o servidor ou aguarde o QR Code.</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* PIX Settings */}
+                  <div className="p-8 border border-line bg-zinc-900/50 rounded-xl">
+                    <h3 className="font-bold uppercase tracking-widest text-[10px] text-primary mb-6">Configurações PIX</h3>
+                    <form onSubmit={handleSaveFinanceSettings} className="space-y-4">
+                      <div className="space-y-1">
+                        <label className="text-[9px] uppercase font-bold opacity-40">Chave PIX (CPF/CNPJ/Email/Tel)</label>
+                        <input 
+                          type="text" 
+                          value={financeSettings.pixKey}
+                          onChange={e => setFinanceSettings({...financeSettings, pixKey: e.target.value})}
+                          className="w-full bg-black border border-white/10 p-2 rounded text-sm focus:border-primary outline-none"
+                          placeholder="Sua chave PIX"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[9px] uppercase font-bold opacity-40">Nome do Titular</label>
+                        <input 
+                          type="text" 
+                          value={financeSettings.pixName}
+                          onChange={e => setFinanceSettings({...financeSettings, pixName: e.target.value})}
+                          className="w-full bg-black border border-white/10 p-2 rounded text-sm focus:border-primary outline-none"
+                          placeholder="Nome completo"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[9px] uppercase font-bold opacity-40">Cidade</label>
+                        <input 
+                          type="text" 
+                          value={financeSettings.pixCity}
+                          onChange={e => setFinanceSettings({...financeSettings, pixCity: e.target.value})}
+                          className="w-full bg-black border border-white/10 p-2 rounded text-sm focus:border-primary outline-none"
+                          placeholder="Sua cidade"
+                        />
+                      </div>
+                      <button type="submit" className="w-full bg-primary text-black py-3 text-[10px] font-bold uppercase tracking-widest hover:opacity-90 transition-all">
+                        Salvar Configurações
+                      </button>
+                    </form>
+                  </div>
+                </div>
+
+                {/* Customers List & Management */}
+                <div className="lg:col-span-2 space-y-8">
+                  {/* Add Customer Form */}
+                  <div className="p-8 border border-line bg-zinc-900/50 rounded-xl">
+                    <h3 className="font-bold uppercase tracking-widest text-[10px] text-primary mb-6">Cadastrar Novo Cliente</h3>
+                    <form onSubmit={handleAddCustomer} className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div className="space-y-1">
+                        <label className="text-[9px] uppercase font-bold opacity-40">Nome do Cliente</label>
+                        <input name="name" type="text" required className="w-full bg-black border border-white/10 p-2 rounded text-sm focus:border-primary outline-none" />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[9px] uppercase font-bold opacity-40">WhatsApp (com DDD)</label>
+                        <input name="phone" type="text" required placeholder="5511999999999" className="w-full bg-black border border-white/10 p-2 rounded text-sm focus:border-primary outline-none" />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[9px] uppercase font-bold opacity-40">Valor Mensal (R$)</label>
+                        <input name="value" type="text" required placeholder="50.00" className="w-full bg-black border border-white/10 p-2 rounded text-sm focus:border-primary outline-none" />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[9px] uppercase font-bold opacity-40">Dia de Vencimento</label>
+                        <input name="dueDay" type="number" min="1" max="31" required className="w-full bg-black border border-white/10 p-2 rounded text-sm focus:border-primary outline-none" />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[9px] uppercase font-bold opacity-40">Usuário MikroTik</label>
+                        <input name="mikrotikUser" type="text" required className="w-full bg-black border border-white/10 p-2 rounded text-sm focus:border-primary outline-none" />
+                      </div>
+                      <div className="flex items-end">
+                        <button type="submit" className="w-full bg-primary text-black py-3 text-[10px] font-bold uppercase tracking-widest hover:opacity-90 transition-all flex items-center justify-center gap-2">
+                          <UserPlus size={16} /> Cadastrar Cliente
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+
+                  {/* Customers Table */}
+                  <div className="border border-line bg-surface overflow-x-auto rounded-xl">
+                    <div className="min-w-[800px]">
+                      <div className="grid grid-cols-[1.5fr_1fr_0.8fr_0.8fr_1fr_120px] p-4 border-b border-line bg-white/5">
+                        <span className="text-[10px] uppercase font-bold tracking-widest opacity-40">Cliente</span>
+                        <span className="text-[10px] uppercase font-bold tracking-widest opacity-40">Telefone</span>
+                        <span className="text-[10px] uppercase font-bold tracking-widest opacity-40">Vencimento</span>
+                        <span className="text-[10px] uppercase font-bold tracking-widest opacity-40">Valor</span>
+                        <span className="text-[10px] uppercase font-bold tracking-widest opacity-40">Status</span>
+                        <span className="text-[10px] uppercase font-bold tracking-widest opacity-40 text-right">Ações</span>
+                      </div>
+                      <div className="divide-y divide-line">
+                        {customers.length === 0 ? (
+                          <div className="p-12 text-center opacity-20 italic">Nenhum cliente cadastrado.</div>
+                        ) : (
+                          customers.map(customer => (
+                            <div key={customer.id} className="grid grid-cols-[1.5fr_1fr_0.8fr_0.8fr_1fr_120px] p-4 items-center hover:bg-white/5 transition-all group">
+                              <div className="flex flex-col">
+                                <span className="font-bold text-white">{customer.name}</span>
+                                <span className="text-[9px] opacity-40 uppercase font-mono">{customer.mikrotikUser}</span>
+                              </div>
+                              <span className="text-sm opacity-60 font-mono">{customer.phone}</span>
+                              <span className="text-sm opacity-60">Dia {customer.dueDay}</span>
+                              <span className="text-sm font-bold text-primary">R$ {customer.value}</span>
+                              <div>
+                                <span className={`px-2 py-1 rounded text-[9px] font-bold uppercase tracking-widest ${
+                                  customer.status === 'active' ? 'bg-emerald-500/10 text-emerald-500' : 
+                                  customer.status === 'suspended' ? 'bg-red-500/10 text-red-500' : 'bg-amber-500/10 text-amber-500'
+                                }`}>
+                                  {customer.status === 'active' ? 'Ativo' : 
+                                   customer.status === 'suspended' ? 'Suspenso' : 'Pendente'}
+                                </span>
+                              </div>
+                              <div className="flex justify-end gap-2">
+                                {customer.status !== 'active' && (
+                                  <button 
+                                    onClick={() => handlePayCustomer(customer.id)}
+                                    title="Confirmar Pagamento"
+                                    className="p-2 text-emerald-500 hover:bg-emerald-500 hover:text-white transition-all rounded"
+                                  >
+                                    <CheckCircle2 size={16} />
+                                  </button>
+                                )}
+                                <button 
+                                  onClick={() => handleDeleteCustomer(customer.id)}
+                                  className="p-2 text-red-500 hover:bg-red-500 hover:text-white transition-all rounded"
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
           )}
 
           {activeTab === 'dashboard' && (
