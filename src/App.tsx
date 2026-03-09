@@ -183,7 +183,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'generator' | 'settings' | 'hotspot' | 'ppp' | 'logs' | 'about' | 'devices' | 'financeiro'>('settings');
   
   // WhatsApp State
-  const [whatsappStatus, setWhatsappStatus] = useState<'disconnected' | 'qr_ready' | 'connected'>('disconnected');
+  const [whatsappStatus, setWhatsappStatus] = useState<'disconnected' | 'qr_ready' | 'connected' | 'loading' | 'error'>('loading');
   const [whatsappQr, setWhatsappQr] = useState<string | null>(null);
   const [customers, setCustomers] = useState<any[]>([]);
   const [financeSettings, setFinanceSettings] = useState({
@@ -204,6 +204,8 @@ export default function App() {
       return () => clearInterval(interval);
     }
   }, [activeTab]);
+
+  const [isRestarting, setIsRestarting] = useState(false);
 
   const fetchWhatsappStatus = async () => {
     try {
@@ -1803,14 +1805,18 @@ export default function App() {
                       <h3 className="font-bold uppercase tracking-widest text-[10px] text-primary">Status WhatsApp</h3>
                       <div className={`flex items-center gap-2 text-[10px] font-bold uppercase ${
                         whatsappStatus === 'connected' ? 'text-emerald-500' : 
-                        whatsappStatus === 'qr_ready' ? 'text-amber-500' : 'text-red-500'
+                        whatsappStatus === 'qr_ready' ? 'text-amber-500' : 
+                        whatsappStatus === 'loading' ? 'text-blue-500' : 'text-red-500'
                       }`}>
                         <div className={`w-2 h-2 rounded-full ${
                           whatsappStatus === 'connected' ? 'bg-emerald-500 animate-pulse' : 
-                          whatsappStatus === 'qr_ready' ? 'bg-amber-500 animate-pulse' : 'bg-red-500'
+                          whatsappStatus === 'qr_ready' ? 'bg-amber-500 animate-pulse' : 
+                          whatsappStatus === 'loading' ? 'bg-blue-500 animate-spin' : 'bg-red-500'
                         }`} />
                         {whatsappStatus === 'connected' ? 'Conectado' : 
-                         whatsappStatus === 'qr_ready' ? 'Aguardando QR' : 'Desconectado'}
+                         whatsappStatus === 'qr_ready' ? 'Aguardando QR' : 
+                         whatsappStatus === 'loading' ? 'Iniciando...' : 
+                         whatsappStatus === 'error' ? 'Erro' : 'Desconectado'}
                       </div>
                     </div>
 
@@ -1822,6 +1828,34 @@ export default function App() {
                         <p className="text-[10px] text-center opacity-60 uppercase tracking-widest leading-relaxed">
                           Escaneie este QR Code com seu WhatsApp para ativar as cobranças automáticas.
                         </p>
+                      </div>
+                    ) : whatsappStatus === 'loading' ? (
+                      <div className="flex flex-col items-center justify-center p-8 text-center">
+                        <RefreshCw className="w-12 h-12 text-blue-500 animate-spin mb-4" />
+                        <p className="text-zinc-400">Iniciando o serviço de WhatsApp...<br/>Isso pode levar até 1 minuto.</p>
+                      </div>
+                    ) : whatsappStatus === 'error' ? (
+                      <div className="flex flex-col items-center justify-center p-8 text-center">
+                        <ShieldAlert className="w-12 h-12 text-red-500 mb-4" />
+                        <p className="text-zinc-400 mb-4">Ocorreu um erro ao iniciar o WhatsApp.<br/>Verifique a conexão ou tente reiniciar.</p>
+                        <button 
+                          disabled={isRestarting}
+                          onClick={async () => {
+                            setIsRestarting(true);
+                            try {
+                              await fetch('/api/whatsapp/restart', { method: 'POST' });
+                              await fetchWhatsappStatus();
+                            } catch (err) {
+                              console.error('Erro ao reiniciar:', err);
+                            } finally {
+                              setIsRestarting(false);
+                            }
+                          }}
+                          className={`px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg flex items-center gap-2 transition-colors ${isRestarting ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        >
+                          <RefreshCw className={`w-4 h-4 ${isRestarting ? 'animate-spin' : ''}`} />
+                          {isRestarting ? 'Reiniciando...' : 'Tentar Novamente'}
+                        </button>
                       </div>
                     ) : whatsappStatus === 'connected' ? (
                       <div className="text-center py-8 space-y-4">
