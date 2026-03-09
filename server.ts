@@ -201,6 +201,21 @@ async function startServer() {
   // ROTAS FINANCEIRO E WHATSAPP
   // ==========================================
 
+  app.post("/api/whatsapp/restart", async (req, res) => {
+    console.log("Reiniciando WhatsApp a pedido do usuário...");
+    whatsappStatus = "loading";
+    whatsappQr = "";
+    try {
+      await client.destroy();
+      await client.initialize();
+      res.json({ success: true });
+    } catch (err) {
+      whatsappStatus = "error";
+      console.error("Erro ao reiniciar WhatsApp:", err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
   app.get("/api/whatsapp/status", async (req, res) => {
     let qrImage = "";
     if (whatsappQr) qrImage = await qrcode.toDataURL(whatsappQr);
