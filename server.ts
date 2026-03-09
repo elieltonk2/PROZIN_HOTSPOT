@@ -29,7 +29,8 @@ async function startServer() {
 
   // --- WHATSAPP SETUP ---
   let whatsappQr = "";
-  let whatsappStatus = "disconnected";
+  let whatsappStatus = "loading";
+  console.log('Iniciando WhatsApp...');
 
   const client = new Client({
     authStrategy: new LocalAuth(),
@@ -41,13 +42,13 @@ async function startServer() {
   client.on('qr', (qr) => {
     whatsappQr = qr;
     whatsappStatus = "qr_ready";
-    console.log('WhatsApp QR Code gerado.');
+    console.log('WhatsApp QR Code gerado. Tamanho:', qr.length);
   });
 
   client.on('ready', () => {
     whatsappQr = "";
     whatsappStatus = "connected";
-    console.log('WhatsApp pronto!');
+    console.log('WhatsApp pronto e conectado!');
   });
 
   client.on('disconnected', () => {
@@ -55,7 +56,10 @@ async function startServer() {
     console.log('WhatsApp desconectado.');
   });
 
-  client.initialize().catch(err => console.error("Erro ao iniciar WhatsApp:", err));
+  client.initialize().catch(err => {
+    whatsappStatus = "error";
+    console.error("Erro ao iniciar WhatsApp:", err);
+  });
 
   // --- PIX HELPER ---
   function crc16(data: string): string {
