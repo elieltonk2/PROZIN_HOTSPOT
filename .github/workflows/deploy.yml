@@ -20,9 +20,9 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
           script: |
-            # Entrar na pasta do projeto (ajuste o caminho se necessário)
-            cd /home/${{ secrets.VPS_USERNAME }}/prozin-hotspot || cd /var/www/prozin-hotspot
+            # Entrar na pasta do projeto na VPS
+            cd ~/PROZIN_HOTSPOT
             
-            # Rodar o script de deploy que criamos
+            # Rodar o script de deploy
             chmod +x deploy.sh
             ./deploy.sh
