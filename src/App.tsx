@@ -38,7 +38,9 @@ import {
   Calendar,
   UserPlus,
   Power,
-  PowerOff
+  PowerOff,
+  Terminal,
+  Copy
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -144,6 +146,14 @@ export default function App() {
     setError(null);
   };
 
+  const handleOpenAdoption = (device: any) => {
+    setSelectedDeviceForAdoption(device);
+    const appUrl = window.location.origin;
+    const script = `:local result [/tool fetch url="${appUrl}/api/mkt/adopt/${device.id}/script.rsc" http-method=post dst-path="prozin-adopt.rsc"]; :do { import "prozin-adopt.rsc"; /file remove "prozin-adopt.rsc"; } on-error={ :log error "Prozin: Erro ao importar script" };`;
+    setAdoptionScript(script);
+    setIsAdoptionModalOpen(true);
+  };
+
   const handleAddDevice = async (newDevice: Omit<Device, 'id'>) => {
     try {
       const res = await fetch('/api/devices', {
@@ -184,12 +194,14 @@ export default function App() {
   
   // WhatsApp State
   const [whatsappStatus, setWhatsappStatus] = useState<'disconnected' | 'qr_ready' | 'connected' | 'loading' | 'error'>('loading');
+  const [whatsappLastError, setWhatsappLastError] = useState<string>('');
   const [whatsappQr, setWhatsappQr] = useState<string | null>(null);
   const [customers, setCustomers] = useState<any[]>([]);
   const [financeSettings, setFinanceSettings] = useState({
     pixKey: '',
     pixName: '',
-    pixCity: ''
+    pixCity: '',
+    billingTime: '09:00'
   });
 
   useEffect(() => {
@@ -213,6 +225,7 @@ export default function App() {
       const data = await res.json();
       setWhatsappStatus(data.status);
       setWhatsappQr(data.qr);
+      if (data.lastError) setWhatsappLastError(data.lastError);
     } catch (err) {
       console.error('Erro ao buscar status do WhatsApp:', err);
     }
@@ -361,6 +374,9 @@ export default function App() {
   }, [profiles]);
 
   const [isAddDeviceModalOpen, setIsAddDeviceModalOpen] = useState(false);
+  const [isAdoptionModalOpen, setIsAdoptionModalOpen] = useState(false);
+  const [adoptionScript, setAdoptionScript] = useState('');
+  const [selectedDeviceForAdoption, setSelectedDeviceForAdoption] = useState<any>(null);
   const [isDiagnosticModalOpen, setIsDiagnosticModalOpen] = useState(false);
   const [diagnosticSteps, setDiagnosticSteps] = useState<{name: string, status: 'pending' | 'loading' | 'success' | 'error', message?: string}[]>([]);
   const [serverPublicIp, setServerPublicIp] = useState<string>('');
@@ -1389,12 +1405,24 @@ export default function App() {
                         <span className={`text-[9px] uppercase font-bold tracking-widest ${selectedDeviceId === device.id ? 'text-primary' : 'opacity-20'}`}>
                           {selectedDeviceId === device.id ? 'Selecionado' : 'Clique para selecionar'}
                         </span>
-                        {selectedDeviceId === device.id && isConnected && (
-                          <div className="flex items-center gap-1 text-[9px] text-primary uppercase font-bold">
-                            <div className="w-1.5 h-1.5 bg-primary rounded-full animate-pulse" />
-                            Ativo
-                          </div>
-                        )}
+                        <div className="flex gap-2">
+                          <button 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenAdoption(device);
+                            }}
+                            className="p-2 bg-white/5 hover:bg-primary/20 text-primary transition-all rounded"
+                            title="Gerar Script de Adoção (Cloud)"
+                          >
+                            <Terminal size={14} />
+                          </button>
+                          {selectedDeviceId === device.id && isConnected && (
+                            <div className="flex items-center gap-1 text-[9px] text-primary uppercase font-bold">
+                              <div className="w-1.5 h-1.5 bg-primary rounded-full animate-pulse" />
+                              Ativo
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
                   );
@@ -1837,25 +1865,54 @@ export default function App() {
                     ) : whatsappStatus === 'error' ? (
                       <div className="flex flex-col items-center justify-center p-8 text-center">
                         <ShieldAlert className="w-12 h-12 text-red-500 mb-4" />
-                        <p className="text-zinc-400 mb-4">Ocorreu um erro ao iniciar o WhatsApp.<br/>Verifique a conexão ou tente reiniciar.</p>
-                        <button 
-                          disabled={isRestarting}
-                          onClick={async () => {
-                            setIsRestarting(true);
-                            try {
-                              await fetch('/api/whatsapp/restart', { method: 'POST' });
-                              await fetchWhatsappStatus();
-                            } catch (err) {
-                              console.error('Erro ao reiniciar:', err);
-                            } finally {
-                              setIsRestarting(false);
-                            }
-                          }}
-                          className={`px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg flex items-center gap-2 transition-colors ${isRestarting ? 'opacity-50 cursor-not-allowed' : ''}`}
-                        >
-                          <RefreshCw className={`w-4 h-4 ${isRestarting ? 'animate-spin' : ''}`} />
-                          {isRestarting ? 'Reiniciando...' : 'Tentar Novamente'}
-                        </button>
+                        <p className="text-zinc-400 mb-2">Ocorreu um erro ao iniciar o WhatsApp.<br/>Verifique a conexão ou tente reiniciar.</p>
+                        {whatsappLastError && (
+                          <div className="bg-red-500/10 text-red-400 text-[10px] p-2 rounded mb-4 max-w-xs break-words font-mono">
+                            {whatsappLastError}
+                          </div>
+                        )}
+                        <div className="text-[8px] text-zinc-600 mb-2 font-mono">
+                          Server: {whatsappStatus === 'error' ? 'Baileys' : 'Loading...'}
+                        </div>
+                        <div className="flex gap-2">
+                          <button 
+                            disabled={isRestarting}
+                            onClick={async () => {
+                              setIsRestarting(true);
+                              try {
+                                await fetch('/api/whatsapp/restart', { method: 'POST' });
+                                await fetchWhatsappStatus();
+                              } catch (err) {
+                                console.error('Erro ao reiniciar:', err);
+                              } finally {
+                                setIsRestarting(false);
+                              }
+                            }}
+                            className={`px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg flex items-center gap-2 transition-colors ${isRestarting ? 'opacity-50 cursor-not-allowed' : ''}`}
+                          >
+                            <RefreshCw className={`w-4 h-4 ${isRestarting ? 'animate-spin' : ''}`} />
+                            {isRestarting ? 'Reiniciando...' : 'Tentar Novamente'}
+                          </button>
+                          <button 
+                            disabled={isRestarting}
+                            onClick={async () => {
+                              if (!confirm('Isso apagará a sessão atual e tentará uma nova conexão. Continuar?')) return;
+                              setIsRestarting(true);
+                              try {
+                                await fetch('/api/whatsapp/clear-session', { method: 'POST' });
+                                await fetchWhatsappStatus();
+                              } catch (err) {
+                                console.error('Erro ao limpar sessão:', err);
+                              } finally {
+                                setIsRestarting(false);
+                              }
+                            }}
+                            className={`px-4 py-2 bg-red-900/20 hover:bg-red-900/40 text-red-500 rounded-lg flex items-center gap-2 transition-colors ${isRestarting ? 'opacity-50 cursor-not-allowed' : ''}`}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                            Limpar Sessão
+                          </button>
+                        </div>
                       </div>
                     ) : whatsappStatus === 'connected' ? (
                       <div className="text-center py-8 space-y-4">
@@ -1907,6 +1964,16 @@ export default function App() {
                           className="w-full bg-black border border-white/10 p-2 rounded text-sm focus:border-primary outline-none"
                           placeholder="Sua cidade"
                         />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[9px] uppercase font-bold opacity-40">Horário da Cobrança (HH:mm)</label>
+                        <input 
+                          type="time" 
+                          value={financeSettings.billingTime || '09:00'}
+                          onChange={e => setFinanceSettings({...financeSettings, billingTime: e.target.value})}
+                          className="w-full bg-black border border-white/10 p-2 rounded text-sm focus:border-primary outline-none"
+                        />
+                        <p className="text-[8px] opacity-40 italic">O sistema enviará as cobranças automaticamente neste horário todos os dias.</p>
                       </div>
                       <button type="submit" className="w-full bg-primary text-black py-3 text-[10px] font-bold uppercase tracking-widest hover:opacity-90 transition-all">
                         Salvar Configurações
@@ -2653,6 +2720,76 @@ pause`;
           </div>
         )}
       </AnimatePresence>
+      {/* Adoption Modal */}
+      {isAdoptionModalOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/90 backdrop-blur-sm">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="w-full max-w-2xl bg-zinc-900 border border-white/10 p-8 relative"
+          >
+            <button 
+              onClick={() => setIsAdoptionModalOpen(false)}
+              className="absolute top-4 right-4 text-white/40 hover:text-white transition-colors"
+            >
+              <X size={24} />
+            </button>
+
+            <div className="flex items-center gap-4 mb-8">
+              <div className="p-3 bg-primary/10 text-primary rounded-lg">
+                <Terminal size={32} />
+              </div>
+              <div>
+                <h3 className="font-serif italic text-3xl">Vincular MikroTik (Cloud)</h3>
+                <p className="opacity-40 text-sm">Use este script para conectar seu MikroTik ao painel sem abrir portas.</p>
+              </div>
+            </div>
+
+            <div className="space-y-6">
+              <div className="p-4 bg-primary/5 border border-primary/20 rounded-lg">
+                <p className="text-xs text-primary/80 leading-relaxed">
+                  Este script irá configurar o serviço API, criar o usuário e avisar o painel sobre o seu IP atual. 
+                  <b> Ideal para quem não tem IP Fixo ou está atrás de CGNAT.</b>
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] uppercase font-bold tracking-widest opacity-40">Script para Terminal</label>
+                <div className="relative group">
+                  <pre className="w-full bg-black border border-white/10 p-4 rounded text-[10px] font-mono text-primary/90 overflow-x-auto whitespace-pre-wrap max-h-[300px]">
+                    {adoptionScript}
+                  </pre>
+                  <button 
+                    onClick={() => copyToClipboard(adoptionScript, 'Script de adoção copiado!')}
+                    className="absolute top-2 right-2 p-2 bg-primary text-bg rounded hover:opacity-90 transition-all shadow-lg"
+                    title="Copiar Script"
+                  >
+                    <Copy size={16} />
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="p-4 bg-white/5 border border-white/10 rounded-lg">
+                  <h4 className="text-[10px] uppercase font-bold tracking-widest text-primary mb-2">Passo 1</h4>
+                  <p className="text-[11px] opacity-60">Copie o script acima clicando no botão verde.</p>
+                </div>
+                <div className="p-4 bg-white/5 border border-white/10 rounded-lg">
+                  <h4 className="text-[10px] uppercase font-bold tracking-widest text-primary mb-2">Passo 2</h4>
+                  <p className="text-[11px] opacity-60">No Winbox, abra o <b>New Terminal</b> e cole o script.</p>
+                </div>
+              </div>
+
+              <button 
+                onClick={() => setIsAdoptionModalOpen(false)}
+                className="w-full py-4 bg-white/5 hover:bg-white/10 text-white font-bold uppercase tracking-widest text-[10px] transition-all"
+              >
+                Concluir
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 }
