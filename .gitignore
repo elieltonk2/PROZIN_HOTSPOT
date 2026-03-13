@@ -7,4 +7,12 @@ coverage/
 .env*
 !.env.example
 devices.json
+customers.json
+settings.json
 logs/
+browser/
+baileys_auth/
+.next/
+out/
+.vercel/
+*.local
