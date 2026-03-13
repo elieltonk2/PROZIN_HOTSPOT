@@ -5,9 +5,10 @@ import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
 import net from "net";
-import { Client, LocalAuth } from 'whatsapp-web.js';
+import makeWASocket, { useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, makeCacheableSignalKeyStore } from '@whiskeysockets/baileys';
 import qrcode from 'qrcode';
 import cron from 'node-cron';
+import pino from 'pino';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -25,41 +26,80 @@ async function startServer() {
 
   // Inicializar arquivos se não existirem
   if (!fs.existsSync(CUSTOMERS_FILE)) fs.writeFileSync(CUSTOMERS_FILE, JSON.stringify([]));
-  if (!fs.existsSync(SETTINGS_FILE)) fs.writeFileSync(SETTINGS_FILE, JSON.stringify({ pixKey: "", pixName: "PROZIN", pixCity: "SAO PAULO" }));
+  if (!fs.existsSync(SETTINGS_FILE)) fs.writeFileSync(SETTINGS_FILE, JSON.stringify({ pixKey: "", pixName: "PROZIN", pixCity: "SAO PAULO", billingTime: "09:00" }));
 
-  // --- WHATSAPP SETUP ---
+  // --- WHATSAPP SETUP (BAILEYS) ---
   let whatsappQr = "";
   let whatsappStatus = "loading";
-  console.log('Iniciando WhatsApp...');
+  let whatsappLastError = "";
+  let sock: any = null;
 
-  const client = new Client({
-    authStrategy: new LocalAuth(),
-    puppeteer: {
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
-    }
-  });
-
-  client.on('qr', (qr) => {
-    whatsappQr = qr;
-    whatsappStatus = "qr_ready";
-    console.log('WhatsApp QR Code gerado. Tamanho:', qr.length);
-  });
-
-  client.on('ready', () => {
+  async function initWhatsapp() {
+    console.log('Iniciando WhatsApp (Baileys)...');
+    whatsappStatus = "loading";
     whatsappQr = "";
-    whatsappStatus = "connected";
-    console.log('WhatsApp pronto e conectado!');
-  });
+    whatsappLastError = "";
 
-  client.on('disconnected', () => {
-    whatsappStatus = "disconnected";
-    console.log('WhatsApp desconectado.');
-  });
+    const { state, saveCreds } = await useMultiFileAuthState(path.resolve(__dirname, 'baileys_auth'));
+    const { version } = await fetchLatestBaileysVersion();
 
-  client.initialize().catch(err => {
-    whatsappStatus = "error";
-    console.error("Erro ao iniciar WhatsApp:", err);
-  });
+    sock = makeWASocket({
+      version,
+      printQRInTerminal: false,
+      auth: {
+        creds: state.creds,
+        keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' })),
+      },
+      logger: pino({ level: 'silent' }),
+      browser: ['Prozin Hotspot', 'Chrome', '1.0.0'],
+    });
+
+    sock.ev.on('creds.update', saveCreds);
+
+    sock.ev.on('connection.update', (update: any) => {
+      const { connection, lastDisconnect, qr } = update;
+      
+      if (qr) {
+        whatsappQr = qr;
+        whatsappStatus = "qr_ready";
+        console.log('WhatsApp QR Code gerado.');
+      }
+
+      if (connection === 'close') {
+        const shouldReconnect = (lastDisconnect?.error as any)?.output?.statusCode !== DisconnectReason.loggedOut;
+        console.log('Conexão fechada devido a ', lastDisconnect?.error, ', reconectando: ', shouldReconnect);
+        whatsappStatus = "disconnected";
+        whatsappLastError = `Conexão fechada: ${lastDisconnect?.error?.message || 'Erro desconhecido'}`;
+        
+        if (shouldReconnect) {
+          initWhatsapp();
+        } else {
+          whatsappStatus = "error";
+          whatsappLastError = "Sessão encerrada. Por favor, limpe a sessão e conecte novamente.";
+        }
+      } else if (connection === 'open') {
+        whatsappQr = "";
+        whatsappStatus = "connected";
+        whatsappLastError = "";
+        console.log('WhatsApp pronto e conectado!');
+      }
+    });
+  }
+
+  initWhatsapp();
+
+  // Helper para enviar mensagem
+  async function sendMessage(jid: string, text: string) {
+    if (!sock || whatsappStatus !== 'connected') {
+      console.error('Tentativa de enviar mensagem sem conexão ativa.');
+      return;
+    }
+    try {
+      await sock.sendMessage(jid, { text });
+    } catch (err) {
+      console.error('Erro ao enviar mensagem:', err);
+    }
+  }
 
   // --- PIX HELPER ---
   function crc16(data: string): string {
@@ -105,48 +145,62 @@ async function startServer() {
   }
 
   // --- CRON JOBS ---
-  cron.schedule('0 9 * * *', async () => {
-    console.log("Iniciando rotina de cobrança e suspensão...");
-    const customers = JSON.parse(fs.readFileSync(CUSTOMERS_FILE, "utf8"));
+  let billingTask: any = null;
+
+  function scheduleBilling() {
+    if (billingTask) billingTask.stop();
+
     const settings = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf8"));
-    const devices = readDevices();
-    if (devices.length === 0) return;
-    const config = devices[0];
-    
-    const today = new Date();
-    const currentDay = today.getDate();
+    const [hour, minute] = (settings.billingTime || "09:00").split(":");
+    const cronTime = `${minute} ${hour} * * *`;
 
-    for (const customer of customers) {
-      if (customer.dueDay === currentDay && whatsappStatus === "connected") {
-        const pix = generatePixPayload(settings.pixKey, settings.pixName, settings.pixCity, customer.amount, "INTERNET");
-        const message = `Olá ${customer.name}! 🚀\n\nSua fatura de internet vence hoje.\nValor: R$ ${customer.amount.toFixed(2)}\n\nChave PIX: ${settings.pixKey}\n\nCopie e cole o código abaixo:\n\n${pix}`;
-        client.sendMessage(`${customer.phone}@c.us`, message);
-        customer.lastBillingDate = today.toISOString().split('T')[0];
-      }
+    console.log(`Agendando rotina de cobrança para: ${cronTime}`);
 
-      const dueDate = new Date();
-      dueDate.setDate(customer.dueDay);
-      const diffTime = today.getTime() - dueDate.getTime();
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    billingTask = cron.schedule(cronTime, async () => {
+      console.log("Iniciando rotina de cobrança e suspensão...");
+      const customers = JSON.parse(fs.readFileSync(CUSTOMERS_FILE, "utf8"));
+      const currentSettings = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf8"));
+      const devices = readDevices();
+      if (devices.length === 0) return;
+      const config = devices[0];
+      
+      const today = new Date();
+      const currentDay = today.getDate();
 
-      if (diffDays >= 3 && customer.status !== "paid") {
-        const mk = new RouterOSAPI({ host: config.host, user: config.user, password: config.password, port: parseInt(config.port) });
-        try {
-          await mk.connect();
-          const users = await mk.write(["/ip/hotspot/user/print", `?name=${customer.mikrotikUser}`]);
-          if (users.length > 0) {
-            await mk.write(["/ip/hotspot/user/set", `=.id=${users[0]['.id']}`, "=disabled=yes"]);
-            customer.status = "suspended";
-            if (whatsappStatus === "connected") {
-              client.sendMessage(`${customer.phone}@c.us`, `⚠️ Atenção ${customer.name}!\n\nSua internet foi suspensa por falta de pagamento. Para reativar, envie o comprovante.`);
+      for (const customer of customers) {
+        if (customer.dueDay === currentDay && whatsappStatus === "connected") {
+          const pix = generatePixPayload(currentSettings.pixKey, currentSettings.pixName, currentSettings.pixCity, customer.amount, "INTERNET");
+          const message = `Olá ${customer.name}! 🚀\n\nSua fatura de internet vence hoje.\nValor: R$ ${customer.amount.toFixed(2)}\n\nChave PIX: ${currentSettings.pixKey}\n\nCopie e cole o código abaixo:\n\n${pix}`;
+          sendMessage(`${customer.phone}@s.whatsapp.net`, message);
+          customer.lastBillingDate = today.toISOString().split('T')[0];
+        }
+
+        const dueDate = new Date();
+        dueDate.setDate(customer.dueDay);
+        const diffTime = today.getTime() - dueDate.getTime();
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+        if (diffDays >= 3 && customer.status !== "paid") {
+          const mk = new RouterOSAPI({ host: config.host, user: config.user, password: config.password, port: parseInt(config.port) });
+          try {
+            await mk.connect();
+            const users = await mk.write(["/ip/hotspot/user/print", `?name=${customer.mikrotikUser}`]);
+            if (users.length > 0) {
+              await mk.write(["/ip/hotspot/user/set", `=.id=${users[0]['.id']}`, "=disabled=yes"]);
+              customer.status = "suspended";
+              if (whatsappStatus === "connected") {
+                sendMessage(`${customer.phone}@s.whatsapp.net`, `⚠️ Atenção ${customer.name}!\n\nSua internet foi suspensa por falta de pagamento. Para reativar, envie o comprovante.`);
+              }
             }
-          }
-          await mk.close();
-        } catch (err) { console.error(`Erro ao suspender ${customer.name}:`, err); }
+            await mk.close();
+          } catch (err) { console.error(`Erro ao suspender ${customer.name}:`, err); }
+        }
       }
-    }
-    fs.writeFileSync(CUSTOMERS_FILE, JSON.stringify(customers, null, 2));
-  });
+      fs.writeFileSync(CUSTOMERS_FILE, JSON.stringify(customers, null, 2));
+    });
+  }
+
+  scheduleBilling();
 
   // Funções de persistência
   const readDevices = () => {
@@ -169,6 +223,48 @@ async function startServer() {
 
   app.get("/api/devices", (req, res) => {
     res.json(readDevices());
+  });
+
+  // Endpoint de Adoção (Estilo MKController - Entrega o Script .rsc)
+  app.post("/api/mkt/adopt/:id/script.rsc", (req, res) => {
+    const { id } = req.params;
+    const devices = readDevices();
+    const device = devices.find((d: any) => d.id === id);
+
+    if (!device) {
+      return res.status(404).send(":log error \"Prozin: Dispositivo nao encontrado!\"");
+    }
+
+    // Gerar o script que o MikroTik vai executar
+    const appUrl = `${req.protocol}://${req.get('host')}`;
+    const script = `
+/ip service set api disabled=no port=${device.port || 8728}
+:do { /user add name="${device.user}" group=full password="${device.password}" } on-error={ /user set [find name="${device.user}"] password="${device.password}" }
+:local publicIP [/tool fetch url="http://checkip.amazonaws.com" mode=http output=user as-value]
+:set publicIP ($publicIP->"data")
+:set publicIP [:pick $publicIP 0 ([:len $publicIP]-1)]
+/tool fetch url="${appUrl}/api/mkt/update-ip?id=${id}&ip=$publicIP" keep-result=no
+:log info "Prozin: MikroTik configurado e vinculado com sucesso!"
+    `.trim();
+
+    res.setHeader('Content-Type', 'text/plain');
+    res.send(script);
+  });
+
+  // Endpoint para atualizar o IP (chamado pelo script acima)
+  app.get("/api/mkt/update-ip", (req, res) => {
+    const { id, ip } = req.query;
+    let devices = readDevices();
+    const deviceIndex = devices.findIndex((d: any) => d.id === id);
+
+    if (deviceIndex !== -1) {
+      devices[deviceIndex].host = String(ip);
+      devices[deviceIndex].lastSeen = new Date().toISOString();
+      saveDevices(devices);
+      res.send("OK");
+    } else {
+      res.status(404).send("Not Found");
+    }
   });
 
   app.post("/api/devices", (req, res) => {
@@ -203,15 +299,16 @@ async function startServer() {
 
   app.post("/api/whatsapp/restart", async (req, res) => {
     console.log("Reiniciando WhatsApp a pedido do usuário...");
-    whatsappStatus = "loading";
-    whatsappQr = "";
     try {
-      await client.destroy();
-      await client.initialize();
+      if (sock) {
+        sock.ev.removeAllListeners('connection.update');
+        await sock.logout().catch(() => {});
+      }
+      initWhatsapp();
       res.json({ success: true });
     } catch (err) {
       whatsappStatus = "error";
-      console.error("Erro ao reiniciar WhatsApp:", err);
+      console.error("Erro fatal ao reiniciar WhatsApp:", err);
       res.status(500).json({ error: String(err) });
     }
   });
@@ -219,7 +316,30 @@ async function startServer() {
   app.get("/api/whatsapp/status", async (req, res) => {
     let qrImage = "";
     if (whatsappQr) qrImage = await qrcode.toDataURL(whatsappQr);
-    res.json({ status: whatsappStatus, qr: qrImage });
+    res.json({ 
+      status: whatsappStatus, 
+      qr: qrImage,
+      lastError: whatsappLastError,
+      version: 'baileys-v1'
+    });
+  });
+
+  app.post("/api/whatsapp/clear-session", async (req, res) => {
+    console.log("Limpando sessão do WhatsApp...");
+    try {
+      if (sock) {
+        sock.ev.removeAllListeners('connection.update');
+        await sock.logout().catch(() => {});
+      }
+      const authPath = path.resolve(__dirname, "baileys_auth");
+      if (fs.existsSync(authPath)) {
+        fs.rmSync(authPath, { recursive: true, force: true });
+      }
+      initWhatsapp();
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: String(err) });
+    }
   });
 
   app.get("/api/settings", (req, res) => {
@@ -228,6 +348,7 @@ async function startServer() {
 
   app.post("/api/settings", (req, res) => {
     fs.writeFileSync(SETTINGS_FILE, JSON.stringify(req.body, null, 2));
+    scheduleBilling(); // Recalcular agendamento
     res.json({ success: true });
   });
 
@@ -266,7 +387,7 @@ async function startServer() {
         }
         await mk.close();
         if (whatsappStatus === "connected") {
-          client.sendMessage(`${customer.phone}@c.us`, `✅ Obrigado ${customer.name}!\n\nSeu pagamento foi confirmado e sua internet já está ativa.`);
+          sendMessage(`${customer.phone}@s.whatsapp.net`, `✅ Obrigado ${customer.name}!\n\nSeu pagamento foi confirmado e sua internet já está ativa.`);
         }
       } catch (err) { console.error("Erro ao reativar:", err); }
       fs.writeFileSync(CUSTOMERS_FILE, JSON.stringify(customers, null, 2));
