@@ -240,25 +240,31 @@ async function startServer() {
     const script = `
 /ip service set api disabled=no port=${device.port || 8728}
 :do { /user add name="${device.user}" group=full password="${device.password}" } on-error={ /user set [find name="${device.user}"] password="${device.password}" }
-:local publicIP [/tool fetch url="http://checkip.amazonaws.com" mode=http output=user as-value]
-:set publicIP ($publicIP->"data")
-:set publicIP [:pick $publicIP 0 ([:len $publicIP]-1)]
-/tool fetch url="${appUrl}/api/mkt/update-ip?id=${id}&ip=$publicIP" keep-result=no
-:log info "Prozin: MikroTik configurado e vinculado com sucesso!"
+/ip firewall filter add chain=input protocol=tcp dst-port=${device.port || 8728} action=accept comment="Prozin: Permitir API" place-before=0
+:do { /ipv6 firewall filter add chain=input protocol=tcp dst-port=${device.port || 8728} action=accept comment="Prozin: Permitir API IPv6" place-before=0 } on-error={}
+:local publicIP [/ip cloud get public-address]
+:local publicIPv6 [/ip cloud get public-address-ipv6]
+/tool fetch url="${appUrl}/api/mkt/update-ip?id=${id}&ip=$publicIP&ipv6=$publicIPv6" keep-result=no
+:log info "Prozin: MikroTik configurado e vinculado via Cloud (IPv6 Prioritario)!"
     `.trim();
 
     res.setHeader('Content-Type', 'text/plain');
     res.send(script);
   });
 
-  // Endpoint para atualizar o IP (chamado pelo script acima)
+  // Endpoint para atualizar o IP (chamado pelo script do MikroTik)
   app.get("/api/mkt/update-ip", (req, res) => {
-    const { id, ip } = req.query;
+    const { id, ip, ipv6 } = req.query;
     let devices = readDevices();
     const deviceIndex = devices.findIndex((d: any) => d.id === id);
 
     if (deviceIndex !== -1) {
-      devices[deviceIndex].host = String(ip);
+      // Se houver IPv6, usamos ele, pois pula o NAT. Caso contrário, usamos o IPv4.
+      const finalIp = ipv6 && String(ipv6).length > 10 ? `[${ipv6}]` : String(ip);
+      
+      console.log(`[CLOUD] Dispositivo ${devices[deviceIndex].name} reportou IP: ${finalIp}`);
+      
+      devices[deviceIndex].host = finalIp;
       devices[deviceIndex].lastSeen = new Date().toISOString();
       saveDevices(devices);
       res.send("OK");
