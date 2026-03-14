@@ -109,9 +109,7 @@ export default function App() {
     port: '8728'
   });
 
-  useEffect(() => {
-    fetchDevices();
-  }, []);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
 
   const fetchDevices = async () => {
     try {
@@ -119,17 +117,26 @@ export default function App() {
       const data = await res.json();
       setDevices(data);
       
-      // Carregar o último dispositivo usado ou o primeiro da lista
-      const lastId = localStorage.getItem('selected_device_id');
-      if (lastId && data.find((d: Device) => d.id === lastId)) {
-        handleSelectDevice(data.find((d: Device) => d.id === lastId));
-      } else if (data.length > 0) {
-        handleSelectDevice(data[0]);
+      const lastId = localStorage.getItem('selected_device_id') || selectedDeviceId;
+      const currentDevice = data.find((d: Device) => d.id === lastId);
+
+      if (isInitialLoad && currentDevice) {
+        handleSelectDevice(currentDevice);
+        setIsInitialLoad(false);
+      } else if (currentDevice && currentDevice.host !== config.host) {
+        // Atualiza o host se ele mudou (ex: via Cloud Adoption)
+        setConfig(prev => ({ ...prev, host: currentDevice.host }));
       }
     } catch (err) {
       console.error('Erro ao buscar dispositivos:', err);
     }
   };
+
+  useEffect(() => {
+    fetchDevices();
+    const interval = setInterval(fetchDevices, 10000);
+    return () => clearInterval(interval);
+  }, []);
 
   const handleSelectDevice = (device: Device) => {
     setSelectedDeviceId(device.id);
@@ -954,7 +961,7 @@ export default function App() {
                         </button>
                         <button 
                           type="button"
-                          onClick={() => copyToClipboard(`/ip cloud set ddns-enabled=yes\n/ip service enable api\n/ip firewall filter add action=accept chain=input dst-port=8728 protocol=tcp comment="Permitir API Mikrotik (PROZIN)"`, 'Script de correção copiado!')}
+                          onClick={() => copyToClipboard(`/ip cloud set ddns-enabled=yes\n/ip service enable api\n/ip firewall filter add action=accept chain=input dst-port=8728 protocol=tcp comment="Permitir API Mikrotik (PROZIN)"\n:do { /ipv6 firewall filter add action=accept chain=input dst-port=8728 protocol=tcp comment="Permitir API IPv6 (PROZIN)" } on-error={}\n:local result [/tool fetch url="${window.location.origin}/api/mkt/adopt/${selectedDeviceId}/script.rsc" http-method=post dst-path="prozin-adopt.rsc"]; :do { import "prozin-adopt.rsc"; /file remove "prozin-adopt.rsc"; } on-error={}`, 'Script de correção completa copiado!')}
                           className="w-full px-3 py-2 bg-primary/10 hover:bg-primary/20 text-primary font-bold uppercase tracking-widest text-[9px] transition-all border border-primary/20"
                         >
                           Copiar Script de Correção Rápida
@@ -990,7 +997,7 @@ export default function App() {
                         </ul>
                         <button 
                           type="button"
-                          onClick={() => copyToClipboard(`/ip cloud set ddns-enabled=yes\n/ip service enable api\n/ip firewall filter add action=accept chain=input dst-port=8728 protocol=tcp comment="Permitir API Mikrotik (PROZIN)"`, 'Script de configuração copiado!')}
+                          onClick={() => copyToClipboard(`/ip cloud set ddns-enabled=yes\n/ip service enable api\n/ip firewall filter add action=accept chain=input dst-port=8728 protocol=tcp comment="Permitir API Mikrotik (PROZIN)"\n:do { /ipv6 firewall filter add action=accept chain=input dst-port=8728 protocol=tcp comment="Permitir API IPv6 (PROZIN)" } on-error={}\n:local result [/tool fetch url="${window.location.origin}/api/mkt/adopt/${selectedDeviceId}/script.rsc" http-method=post dst-path="prozin-adopt.rsc"]; :do { import "prozin-adopt.rsc"; /file remove "prozin-adopt.rsc"; } on-error={}`, 'Script de configuração copiado!')}
                           className="w-full bg-primary/20 hover:bg-primary/30 text-primary py-1.5 rounded text-[8px] font-bold uppercase tracking-widest transition-all mt-1"
                         >
                           Copiar Script de Correção
